@@ -31,18 +31,32 @@ fn mac_dirs() -> Result<Vec<PathBuf>> {
     ])
 }
 
-/// Every report file directly in the Mac's DiagnosticReports directories.
+/// Every report file directly in the Mac's DiagnosticReports directories, except hidden
+/// files (Console.app does not list them). /Library/Logs/DiagnosticReports is readable only
+/// by admins (group _analyticsusers); for other users it is skipped with a note on stderr.
 pub fn list_mac() -> Result<Vec<Report>> {
     let mut reports = Vec::new();
     for dir in mac_dirs()? {
         let entries = match fs::read_dir(&dir) {
             Ok(e) => e,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!(
+                    "slog: skipping {}: permission denied (system reports need an admin account)",
+                    dir.display()
+                );
+                continue;
+            }
             Err(e) => return Err(e).with_context(|| format!("cannot list {}", dir.display())),
         };
         for entry in entries {
             let entry = entry.with_context(|| format!("cannot list {}", dir.display()))?;
-            let meta = entry.metadata()?;
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let meta = entry
+                .metadata()
+                .with_context(|| format!("cannot read {}", entry.path().display()))?;
             if !meta.is_file() {
                 continue;
             }
@@ -126,7 +140,7 @@ pub fn render(name: &str, bytes: &[u8], full: bool) -> Result<String> {
     }
     let (header, body) = text.split_once('\n').unwrap_or((&text, ""));
     let header: Value = serde_json::from_str(header)
-        .with_context(|| format!("{name}: first line is not the .ips JSON header"))?;
+        .with_context(|| format!("{name}: first line is not the .ips JSON header; try --full"))?;
     if header["bug_type"] != "309" {
         return Ok(text);
     }
@@ -199,17 +213,19 @@ fn crash_summary(header: &Value, body: &Value) -> Result<String> {
         .as_array()
         .map(|a| a.iter().map(s).collect())
         .unwrap_or_default();
-    field(
-        &mut out,
-        "Termination:",
-        format!(
-            "{} {} {}",
-            s(&term["namespace"]),
-            term["code"],
-            s(&term["indicator"])
-        )
-        .trim(),
-    );
+    if term.is_object() {
+        field(
+            &mut out,
+            "Termination:",
+            format!(
+                "{} {} {}",
+                s(&term["namespace"]),
+                term["code"],
+                s(&term["indicator"])
+            )
+            .trim(),
+        );
+    }
     field(&mut out, "Reasons:", &reasons.join("; "));
     if let Some(asi) = body["asi"].as_object() {
         for (image, lines) in asi {
@@ -346,6 +362,14 @@ mod tests {
         ] {
             assert!(out.contains(expected), "missing {expected:?} in:\n{out}");
         }
+    }
+
+    #[test]
+    fn crash_summary_omits_absent_termination() {
+        let (h, mut b) = crash();
+        b.as_object_mut().unwrap().remove("termination");
+        let out = crash_summary(&h, &b).unwrap();
+        assert!(!out.contains("Termination:"), "{out}");
     }
 
     #[test]

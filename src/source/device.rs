@@ -154,7 +154,7 @@ async fn select(selector: &str) -> Result<UsbmuxdDevice> {
 }
 
 /// Connects to the device's crash report store after asking it to move pending reports
-/// there (`crashreportmover`, ~2 s), so reports written moments ago are included.
+/// there (`crashreportmover`, ~1-2 s), so reports written moments ago are included.
 async fn crash_reports(selector: &str) -> Result<(UsbmuxdDevice, CrashReportCopyMobileClient)> {
     let device = select(selector).await?;
     let p = provider(&device);

@@ -78,6 +78,8 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - Case-insensitive matching differs for some non-ASCII text: NSPredicate (Mac) uses full
   Unicode folding, so `STRASSE` matches `Straße`; the device backend uses `to_lowercase` and
   does not. Fixing this needs a Unicode case-folding crate.
+- Non-admin users cannot read `/Library/Logs/DiagnosticReports` (`root:_analyticsusers 0770`);
+  `slog reports list` skips it with a stderr note and lists only `~/Library` reports.
 - Values logged as private print as `<private>` (same as Console.app).
 - `zsh` has a `log` builtin; always invoke `/usr/bin/log` by absolute path.
 - `os_trace_relay` rejects unknown level bytes with an error, ending the stream; if a future

@@ -150,7 +150,8 @@ Crash reports (.ips files with bug_type 309) print as a summary: process and ver
 exception, termination reason, application-specific info (e.g. Swift fatal error
 messages), the last exception backtrace if any, and the crashed thread's frames. Other
 threads, register state and binary images are omitted; --full prints the original file.
-Every other report prints unchanged. Some (.diag, JetsamEvent) are large.
+Every other report prints unchanged. Some (.diag, JetsamEvent) are large. An .ips file
+without a JSON header line is an error unless --full is given.
 
 Put NAME before --device: `--device NAME` would read NAME as the device.
 
@@ -187,7 +188,7 @@ pub struct ReportsListArgs {
 
 #[derive(Args, Debug)]
 pub struct ReportsShowArgs {
-    /// Report name from `slog reports list`, or a path to a report file on this Mac
+    /// Report name from `slog reports list`, or a path containing '/' (e.g. ./x.ips)
     pub name: String,
 
     /// Print the whole original file instead of a crash summary

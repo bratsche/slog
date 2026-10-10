@@ -76,7 +76,7 @@ Field mapping:
 
 ```text
 slog reports list  ──► Mac: read_dir(~/Library/Logs/DiagnosticReports, /Library/...)
-                   └─► device: crashreportmover flush (~2 s) → crashreportcopymobile ls + AFC stat
+                   └─► device: crashreportmover flush (~1-2 s) → crashreportcopymobile ls + AFC stat
                          ──► reports::select (since --last, --name, newest first, --limit) ──► stdout
 slog reports show  ──► Mac: find by name in both dirs (or a path) / device: AFC pull
                          ──► reports::render: .ips bug_type 309 → crash summary; else unchanged
