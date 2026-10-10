@@ -33,10 +33,17 @@ work, but is untested). The device must be unlocked and trusted; no `sudo` is ne
 Requires macOS (it reads the unified log through `/usr/bin/log`).
 
 ```sh
-cargo install slog-cli   # installs the `slog` command
+brew install bratsche/tap/slog
 ```
 
-The crate is named `slog-cli` because `slog` is already taken on crates.io.
+or with Cargo:
+
+```sh
+cargo install --locked slog-cli   # installs the `slog` command
+```
+
+The crate is named `slog-cli` because `slog` is already taken on crates.io. Both build from
+source; Homebrew brings its own Rust, Cargo needs Rust 1.89 or newer.
 
 ## Usage
 
