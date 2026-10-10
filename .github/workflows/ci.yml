@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on PR branches; let every push to main finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test, smoke
+    # slog only builds on macOS (it reads the unified log via /usr/bin/log).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      # Parses real `log show` output from the runner's macOS. No device is attached, so
+      # --device paths are not exercised here.
+      - name: Smoke test against the runner's unified log
+        run: |
+          cargo run --locked --quiet -- show --last 1m --limit 5
+          cargo run --locked --quiet -- show --last 1m --limit 5 --json --filter 'level:error level:fault level:default'
+          cargo run --locked --quiet -- stream --duration 3s --limit 5
+          cargo run --locked --quiet -- reports list --limit 5
+      - name: Package
+        run: cargo package --locked
+
+  msrv:
+    name: MSRV (rust-version)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the toolchain named by rust-version
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ -z "$msrv" ]; then
+            echo "rust-version not found in Cargo.toml" >&2
+            exit 1
+          fi
+          rustup toolchain install "$msrv" --profile minimal
+          echo "MSRV=$msrv" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +"$MSRV" check --all-targets --locked
