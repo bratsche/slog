@@ -10,6 +10,8 @@ readme = "README.md"
 repository = "https://github.com/bratsche/slog"
 keywords = ["macos", "ios", "logging", "console", "oslog"]
 categories = ["command-line-utilities", "development-tools::debugging"]
+# Repo-only files. Keep skill/: src/skill.rs include_str!s skill/SKILL.md.
+exclude = [".github", "docs"]
 
 [[bin]]
 name = "slog"
