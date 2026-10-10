@@ -86,8 +86,9 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
   - Done: packaged as `slog-cli` (binary `slog`; `slog` is taken on crates.io), README,
     LICENSE, MSRV 1.89, `cargo publish --dry-run` clean. Builds only on macOS
     (`compile_error!` elsewhere).
-  - Next: CI (GitHub Actions on macOS), then a `v0.1.0` release, crates.io publish and a
-    Homebrew tap formula.
+  - Done: CI (GitHub Actions on macOS: fmt, clippy, tests, smoke runs, MSRV).
+  - Done: release `v0.1.0`: git tag and GitHub release, Homebrew tap `bratsche/homebrew-tap`
+    (formula builds from source), crates.io `slog-cli` (published by the maintainer).
 
 ### Phase 4
 
