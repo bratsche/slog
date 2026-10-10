@@ -120,7 +120,8 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - Case-insensitive matching differs for some non-ASCII text: NSPredicate (Mac) uses full
   Unicode folding, so `STRASSE` matches `Straße`; the device backend uses `to_lowercase` and
   does not. Fixing this needs a Unicode case-folding crate.
-- `show --archive` without `--start` reads the whole archive; a sysdiagnose takes minutes.
+- `show --archive` without `--start` or `--last` reads the whole archive; a sysdiagnose takes
+  minutes. With `--archive`, `--last` counts back from the archive's newest entry.
 - `show --device` keeps its copied archive (~300 MB+) in `$TMPDIR/slog-*` while running and
   deletes it on exit, but not if killed (Ctrl-C, SIGKILL). macOS purges `$TMPDIR`
   periodically; delete stragglers with `rm -rf "$TMPDIR"/slog-*`.

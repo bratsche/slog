@@ -63,6 +63,19 @@ different fields) is AND'd.
   by process or subsystem.
 - `--predicate` works with `show --device` but not `stream --device`; use `--filter`.
 
+## Crash and diagnostic reports
+
+- `slog reports list --name MyApp` lists reports newest first (last 7 days, 50 max), as
+  `time  size  name`. Add `--device` for a connected iPhone/iPad (takes a few seconds).
+- `slog reports show <name>` (add `--device` *after* the name for device reports) prints a
+  crash report as a short summary: exception, termination reason, app-specific info such as
+  Swift `Fatal error:` messages, and the crashed thread's frames. Start there; use `--full`
+  only if you need other threads or binary images.
+- Other report types (`.diag`, JetsamEvent, ...) print unchanged and can be hundreds of KB;
+  check `size` in the list before showing one.
+- When debugging a crash, pair the report with the logs just before it:
+  `slog show --start '<crash time minus 1m>' --end '<crash time>' --filter 'process:MyApp'`.
+
 ## Limits
 
 - Values logged as private appear as `<private>`; slog cannot reveal them.
