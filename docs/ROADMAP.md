@@ -24,7 +24,7 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 | `.logarchive` | `slog show --archive` | `/usr/bin/log show <archive>` | Done |
 | iPhone/iPad, live (USB, usbmuxd Wi-Fi) | `slog stream --device` | `idevice` crate, `os_trace_relay` | Done |
 | iPhone/iPad seen only by Xcode/CoreDevice (Wi-Fi) | `--device` | `idevice` `rsd` + `tunnel` + `remote_pairing` | Phase 2b |
-| iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Phase 2 |
+| iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Done |
 | Crash/spin/diagnostic reports (Mac) | `slog reports list\|show` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/DiagnosticReports` | Done |
 | Crash reports (device) | `slog reports list\|show --device` | `crashreportmover` flush + `crashreportcopymobile` | Done |
 | Apple Watch crash reports | `slog reports --device` | `ProxiedDevice-*` dirs in the iPhone's report store | Not started |
@@ -58,15 +58,19 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 ### Phase 2
 
-- `slog show --device` via `CreateArchive`
+- Done: `slog show --device` via `CreateArchive` (~5-10 s, ~300 MB temporary for the
+  default 5m window). Supports `--predicate`, unlike `stream --device`.
+- Possible follow-up: `--save-archive PATH` so repeated queries reuse one copy via
+  `--archive` instead of re-copying each time.
 - Done: `slog reports list|show [--device]`. Crash reports (`.ips`, bug_type 309) print as a
   summary (exception, termination, app-specific info, last exception backtrace, crashed
   thread); `--full` and every other report type print the file unchanged.
 - Not included: `Retired/` and other subdirectories; Console's "Log Reports" (text logs in
   `~/Library/Logs`, `/var/log`); Mac Analytics Data.
-- `slog skill install --user|--project` and `slog skill print`: the Claude skill is embedded
-  in the binary so it always matches the installed version
-  (`~/.claude/skills/slog/SKILL.md` or `./.claude/skills/slog/SKILL.md`)
+- Done: `slog skill install --user|--project [--force]` and `slog skill print`. The skill
+  (`skill/SKILL.md`, `{{VERSION}}` filled in at runtime) is embedded in the binary so it
+  always matches the installed version. Existing files with different contents are only
+  replaced with `--force`, to protect local edits.
 
 ### Phase 2b
 

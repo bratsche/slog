@@ -4,16 +4,21 @@ mod filter;
 mod output;
 mod reports;
 mod run;
+mod skill;
 mod source;
 
 use std::io::{self, Write};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use chrono::Local;
 use clap::Parser;
 use futures::StreamExt;
 
-use cli::{Cli, Command, DevicesArgs, QueryArgs, ReportsCommand, ShowArgs, StreamArgs};
+use cli::{
+    Cli, Command, DevicesArgs, QueryArgs, ReportsCommand, ShowArgs, SkillCommand, StreamArgs,
+};
 use entry::Level;
 use filter::Filter;
 use output::Printer;
@@ -26,6 +31,7 @@ async fn main() -> ExitCode {
         Command::Show(args) => show(args).await,
         Command::Stream(args) => stream(args).await,
         Command::Devices(args) => devices(args).await,
+        Command::Skill(cmd) => skill(cmd),
         Command::Reports(cmd) => reports_cmd(cmd).await,
     };
     match result {
@@ -77,19 +83,46 @@ impl Query {
 
 async fn show(args: ShowArgs) -> Result<()> {
     let query = Query::new(&args.query)?;
-    let last = match (args.last, &args.start, &args.archive) {
-        (Some(span), _, _) => Some(span.to_log_arg()),
-        (None, None, None) => Some("5m".to_string()),
-        (None, _, _) => None,
+    // Holds a device's copied archive until printing is done; deleted on drop.
+    let mut _device_archive = None;
+    let (archive, last, start) = match &args.device {
+        Some(selector) => {
+            // An explicit start for both the copy and `log show`, so `log` never has to
+            // interpret --last relative to an archive.
+            let start = match (&args.last, &args.start) {
+                (Some(span), _) => Local::now() - span.0,
+                (None, Some(s)) => cli::parse_local_time(s)?,
+                (None, None) => Local::now() - Duration::from_secs(300),
+            };
+            let dir = tempfile::Builder::new().prefix("slog-").tempdir()?;
+            let path = dir.path().join("device.logarchive");
+            device::collect_archive(selector, start, &path).await?;
+            _device_archive = Some(dir);
+            // With the offset: without it, a time in the hour repeated when DST ends is
+            // ambiguous.
+            let start = args
+                .start
+                .clone()
+                .unwrap_or_else(|| start.format("%Y-%m-%d %H:%M:%S%z").to_string());
+            (Some(path), None, Some(start))
+        }
+        None => {
+            let last = match (args.last, &args.start, &args.archive) {
+                (Some(span), _, _) => Some(span.to_log_arg()),
+                (None, None, None) => Some("5m".to_string()),
+                (None, _, _) => None,
+            };
+            (args.archive.clone(), last, args.start.clone())
+        }
     };
     let entries = mac::show(mac::ShowQuery {
-        archive: args.archive,
+        archive,
         last,
-        start: args.start,
+        start,
         end: args.end,
         verbosity: query.verbosity,
         predicate: query.predicate(&args.query.predicate),
-    });
+    })?;
     let mut printer = Printer::new(args.query.json, &args.query.fields);
     run::show(entries, args.limit, &mut printer).await
 }
@@ -146,6 +179,26 @@ async fn devices(args: DevicesArgs) -> Result<()> {
     Ok(())
 }
 
+fn skill(cmd: SkillCommand) -> Result<()> {
+    match cmd {
+        SkillCommand::Print => write!(io::stdout(), "{}", skill::contents())?,
+        SkillCommand::Install(args) => {
+            let path = if args.user {
+                skill::user_path()?
+            } else {
+                skill::project_path()
+            };
+            let what = match skill::install(&path, args.force)? {
+                skill::Installed::Created => "installed",
+                skill::Installed::Updated => "updated",
+                skill::Installed::Unchanged => "already up to date",
+            };
+            writeln!(io::stdout(), "{what}: {}", path.display())?;
+        }
+    }
+    Ok(())
+}
+
 async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
     let mut out = io::stdout().lock();
     match cmd {
@@ -154,7 +207,7 @@ async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
                 Some(selector) => device::list_reports(selector).await?,
                 None => reports::list_mac()?,
             };
-            let since = chrono::Local::now() - args.last.0;
+            let since = Local::now() - args.last.0;
             let (picked, total) = reports::select(all, since, args.name.as_deref(), args.limit);
             for r in &picked {
                 if args.json {

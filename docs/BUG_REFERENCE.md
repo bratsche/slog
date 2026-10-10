@@ -4,6 +4,20 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Fixed
 
+### `slog skill` review fixes (2026-10-10)
+
+- `HOME= slog skill install --user` installed into `./.claude/skills/slog/` (the project
+  location) and reported success. `PathBuf::join` on an empty or relative `HOME` yields a
+  path relative to the current directory; `user_path` now rejects a non-absolute `HOME`.
+- `slog skill print | head` (reader gone before the write) panicked with exit 101 because
+  `print!` panics on `EPIPE`. Output now goes through `write!` so `main`'s broken-pipe
+  handling applies, as for the other commands.
+- The skill and `slog skill --help` said to re-run `slog skill install` after upgrading,
+  but the new version always differs from the installed file, so that fails without
+  `--force`. Both now say `--force`. The skill also said "same-field tokens are OR'd",
+  which is wrong for exclusions (`-process:a -process:b` excludes both); now "positive
+  tokens".
+
 ### Every `--filter` search matched one spurious `log` entry
 
 - **Symptom:** `slog show --filter nonexistent` printed a `log[pid] ... log run
@@ -54,6 +68,34 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - **Solution:** `allow_hyphen_values = true` on `--filter`; covered by
   `cli::tests::filter_may_start_with_negation`.
 
+### `show --archive` failed on every archive (found 2026-10-10)
+
+- **Symptom:** `unexpected output from /usr/bin/log: ==========`.
+- **Root cause:** after its `{"count":N,"finished":1}` trailer, `log show <archive>` prints a
+  `==========` / archive path / `==========` block, which the ndjson parser rejected. Phase 1
+  never ran `--archive` because no archive was available to test with.
+- **Solution:** `source/mac.rs::run` skips that block (the path is canonicalized, since `log`
+  prints `/private/var/...` for `/var/...`) and forwards any other post-trailer line to
+  stderr.
+- **Prevention:** `show --device` exercises the archive path on every run.
+
+### Review fixes for `show --device` (2026-10-10)
+
+- An unreadable archive reported `unexpected output from /usr/bin/log: ==========` instead
+  of `log`'s error: `log` prints the `==========` / path block even when it fails, with no
+  trailer before it. The block is now skipped wherever it appears, so the exit status and
+  stderr (`The log archive is corrupt or incomplete`) are reported.
+- `show --device` hung when tar printed more than a pipe's worth of errors (reproduced with
+  `--last 7d` and `TMPDIR` on a 20 MB disk): tar's stderr was read only after the copy, so
+  tar blocked writing it and stopped reading the archive. stderr is now drained during the
+  copy; the run ends with tar's "No space left on device" error.
+- `--last` was passed to `log` as a local time without offset, ambiguous in the hour
+  repeated when DST ends; it now includes the offset (`+zzzz`, accepted by `log`).
+- Help said `--last` with `--archive` counts from now; `log` counts back from the archive's
+  newest entry (verified on a copied device archive). Help corrected.
+- The "copying logs since" note printed only the time of day, misleading for `--last 7d`;
+  it now includes the date.
+
 ## Upstream workarounds
 
 ### `idevice` 0.1.68: device timestamps lose sub-second precision
@@ -78,6 +120,10 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - Case-insensitive matching differs for some non-ASCII text: NSPredicate (Mac) uses full
   Unicode folding, so `STRASSE` matches `Straße`; the device backend uses `to_lowercase` and
   does not. Fixing this needs a Unicode case-folding crate.
+- `show --archive` without `--start` reads the whole archive; a sysdiagnose takes minutes.
+- `show --device` keeps its copied archive (~300 MB+) in `$TMPDIR/slog-*` while running and
+  deletes it on exit, but not if killed (Ctrl-C, SIGKILL). macOS purges `$TMPDIR`
+  periodically; delete stragglers with `rm -rf "$TMPDIR"/slog-*`.
 - Non-admin users cannot read `/Library/Logs/DiagnosticReports` (`root:_analyticsusers 0770`);
   `slog reports list` skips it with a stderr note and lists only `~/Library` reports.
 - Values logged as private print as `<private>` (same as Console.app).

@@ -3,9 +3,12 @@
 //! Live logs come from `com.apple.os_trace_relay`, the service Console.app uses. It has no
 //! predicate support, so `--filter` is applied in-process by the caller.
 
+use std::path::Path;
+use std::process::Stdio;
+
 use anyhow::{Context, Result, bail};
 use async_stream::try_stream;
-use chrono::{Local, NaiveDateTime, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Timelike, Utc};
 use idevice::IdeviceService;
 use idevice::crashreportcopymobile::{CrashReportCopyMobileClient, flush_reports};
 use idevice::lockdown::LockdownClient;
@@ -13,6 +16,8 @@ use idevice::os_trace_relay::{LogLevel, OsTraceLog, OsTraceRelayClient};
 use idevice::provider::{IdeviceProvider, UsbmuxdProvider};
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection, UsbmuxdDevice};
 use serde::Serialize;
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 
 use super::Entries;
 use crate::entry::{Entry, Level, basename};
@@ -153,6 +158,72 @@ async fn select(selector: &str) -> Result<UsbmuxdDevice> {
     }
 }
 
+/// Copies the device's unified log from `start` onward into `dest`, a new .logarchive
+/// directory, for `log show`. The relay sends a tar stream, piped straight into tar.
+///
+/// `start` matters: without it the relay sends the whole store (~3 GB, ~20 s on an
+/// iPhone); with it, only the files covering that window (~300 MB, ~5 s).
+pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path) -> Result<()> {
+    let device = select(selector).await?;
+    let mut client = OsTraceRelayClient::connect(&provider(&device))
+        .await
+        .with_context(|| format!("cannot start os_trace_relay on {}", device.udid))?;
+    eprintln!(
+        "slog: copying logs since {} from {}...",
+        start.format("%Y-%m-%d %H:%M:%S"),
+        device.udid
+    );
+    let start_secs = u64::try_from(start.timestamp()).context("start time is before 1970")?;
+    std::fs::create_dir_all(dest).with_context(|| format!("cannot create {}", dest.display()))?;
+
+    let mut tar = Command::new("/usr/bin/tar")
+        .arg("-xf")
+        .arg("-")
+        .arg("-C")
+        .arg(dest)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("failed to run /usr/bin/tar")?;
+    let mut stdin = tar.stdin.take().expect("stdin is piped");
+    let mut stderr = tar.stderr.take().expect("stderr is piped");
+    // stderr is read during the copy: tar prints a line per file it cannot write (e.g. disk
+    // full), and once the pipe is full tar stops reading stdin, which stalls the copy.
+    let mut tar_errors = String::new();
+    let (copied, read) = tokio::join!(
+        async move {
+            let copied = client
+                .create_archive(&mut stdin, None, None, Some(start_secs))
+                .await;
+            drop(stdin);
+            copied
+        },
+        stderr.read_to_string(&mut tar_errors),
+    );
+    let status = tar.wait().await?;
+    read?;
+    copied.with_context(|| format!("copying the log archive from {} failed", device.udid))?;
+    if !status.success() {
+        bail!(
+            "/usr/bin/tar could not unpack the device's log archive ({status}): {}",
+            first_line_and_count(&tar_errors)
+        );
+    }
+    Ok(())
+}
+
+/// tar prints a line per failed file (thousands when the disk fills); keep errors short.
+fn first_line_and_count(text: &str) -> String {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let first = lines.next().unwrap_or("(no output)").trim().to_string();
+    match lines.count() {
+        0 => first,
+        n => format!("{first} (and {n} more lines)"),
+    }
+}
+
 /// Connects to the device's crash report store after asking it to move pending reports
 /// there (`crashreportmover`, ~1-2 s), so reports written moments ago are included.
 async fn crash_reports(selector: &str) -> Result<(UsbmuxdDevice, CrashReportCopyMobileClient)> {
@@ -270,6 +341,19 @@ fn device_time(ts: NaiveDateTime) -> Result<chrono::DateTime<Local>> {
 mod tests {
     use super::*;
     use chrono::DateTime;
+
+    #[test]
+    fn tar_errors_are_shortened() {
+        assert_eq!(
+            first_line_and_count("tar: a: No space left\n"),
+            "tar: a: No space left"
+        );
+        assert_eq!(
+            first_line_and_count("tar: a: No space\ntar: b: No space\n\ntar: c: No space\n"),
+            "tar: a: No space (and 2 more lines)"
+        );
+        assert_eq!(first_line_and_count(""), "(no output)");
+    }
 
     #[test]
     fn device_time_restores_microseconds() {

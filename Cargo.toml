@@ -17,4 +17,5 @@ idevice = { version = "0.1.68", features = ["usbmuxd", "syslog_relay", "crashrep
 plist = "1.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time"] }
