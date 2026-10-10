@@ -148,7 +148,7 @@ async fn devices(args: DevicesArgs) -> Result<()> {
 
 fn skill(cmd: SkillCommand) -> Result<()> {
     match cmd {
-        SkillCommand::Print => print!("{}", skill::contents()),
+        SkillCommand::Print => write!(io::stdout(), "{}", skill::contents())?,
         SkillCommand::Install(args) => {
             let path = if args.user {
                 skill::user_path()?
@@ -160,7 +160,7 @@ fn skill(cmd: SkillCommand) -> Result<()> {
                 skill::Installed::Updated => "updated",
                 skill::Installed::Unchanged => "already up to date",
             };
-            println!("{what}: {}", path.display());
+            writeln!(io::stdout(), "{what}: {}", path.display())?;
         }
     }
     Ok(())

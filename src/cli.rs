@@ -116,8 +116,8 @@ os_version are null); unlock the device and tap Trust, then retry.")]
         subcommand,
         long_about = "\
 Install or print the Claude skill that teaches Claude how to use slog. The skill is built
-into this binary, so it always matches this slog version; re-run `slog skill install`
-after upgrading slog."
+into this binary, so it always matches this slog version; after upgrading slog, re-run
+`slog skill install --force` with the same --user or --project to replace the old version."
     )]
     Skill(SkillCommand),
 }

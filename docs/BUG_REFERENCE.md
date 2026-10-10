@@ -4,6 +4,20 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Fixed
 
+### `slog skill` review fixes (2026-10-10)
+
+- `HOME= slog skill install --user` installed into `./.claude/skills/slog/` (the project
+  location) and reported success. `PathBuf::join` on an empty or relative `HOME` yields a
+  path relative to the current directory; `user_path` now rejects a non-absolute `HOME`.
+- `slog skill print | head` (reader gone before the write) panicked with exit 101 because
+  `print!` panics on `EPIPE`. Output now goes through `write!` so `main`'s broken-pipe
+  handling applies, as for the other commands.
+- The skill and `slog skill --help` said to re-run `slog skill install` after upgrading,
+  but the new version always differs from the installed file, so that fails without
+  `--force`. Both now say `--force`. The skill also said "same-field tokens are OR'd",
+  which is wrong for exclusions (`-process:a -process:b` excludes both); now "positive
+  tokens".
+
 ### Every `--filter` search matched one spurious `log` entry
 
 - **Symptom:** `slog show --filter nonexistent` printed a `log[pid] ... log run

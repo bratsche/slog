@@ -13,8 +13,12 @@ pub fn contents() -> String {
 
 /// `~/.claude/skills/slog/SKILL.md`
 pub fn user_path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
-    Ok(Path::new(&home).join(".claude/skills/slog/SKILL.md"))
+    let home = PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?);
+    // An empty or relative HOME would silently install relative to the current directory.
+    if !home.is_absolute() {
+        bail!("HOME is not an absolute path: {:?}", home);
+    }
+    Ok(home.join(".claude/skills/slog/SKILL.md"))
 }
 
 /// `./.claude/skills/slog/SKILL.md`, relative to the current directory.

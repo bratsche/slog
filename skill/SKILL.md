@@ -33,8 +33,9 @@ word / "a phrase"     message, process, subsystem or category contains it
 process:MyApp         field contains value      process:=MyApp   exact match
 -category:network     exclude                    pid:1234         level:error
 ```
-Fields: message, process, pid, subsystem, category, library, level. Same-field tokens are
-OR'd (`level:error level:fault`); everything else is AND'd.
+Fields: message, process, pid, subsystem, category, library, level. Positive tokens on the
+same field are OR'd (`level:error level:fault`); everything else (bare words, exclusions,
+different fields) is AND'd.
 
 ## Workflow
 
@@ -64,6 +65,6 @@ OR'd (`level:error level:fault`); everything else is AND'd.
 - A device that Xcode sees only wirelessly (`xcrun devicectl list devices`) but that is not
   in `slog devices` needs a USB cable.
 
-This skill was written for slog {{VERSION}}. If `slog --version` differs, run
-`slog skill install` again (with `--user` or `--project`, matching where it was installed)
-to update it.
+This skill was written for slog {{VERSION}}. If `slog --version` differs, update it with
+`slog skill install --force` plus `--user` or `--project`, matching where it was installed
+(`--force` is needed because the contents changed; it also replaces any local edits).
