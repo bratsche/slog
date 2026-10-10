@@ -2,6 +2,7 @@
 
 pub mod device;
 pub mod mac;
+pub mod simulator;
 
 use std::pin::Pin;
 

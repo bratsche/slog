@@ -16,6 +16,8 @@ First release. Crate `slog-cli` (installs the `slog` command); Homebrew
   `os_trace_relay` `CreateArchive`, no `sudo`; supports `--predicate`), and
   `--save-archive PATH` to keep that copy for reuse with `--archive`.
 - `devices` lists connected iOS devices.
+- Booted simulators: `simulators` lists them; `show --simulator` and `stream --simulator`
+  run `log` inside one via `xcrun simctl spawn` (`--predicate` supported).
 - `reports list|show [--device]`: crash, hang and diagnostic reports from the Mac or a
   device, with a compact crash summary (`--full` for the original file).
 

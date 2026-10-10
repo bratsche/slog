@@ -1,7 +1,7 @@
 //! Clean shutdown on SIGINT, SIGTERM and SIGHUP.
 //!
 //! The first signal makes `main` drop the running command, which deletes temp dirs (the
-//! `show --device` archive copy) and kills child processes, before slog dies by that
+//! `show --device` archive copy) and stops child processes, before slog dies by that
 //! signal. Dying by the signal, rather than exiting 128 + N, matters: a shell only stops a
 //! script on Ctrl-C if its child was killed by SIGINT.
 //!

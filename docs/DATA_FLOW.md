@@ -14,6 +14,7 @@ CLI args (cli.rs)
    ▼                                     ▼
 Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──►  Printer (output.rs)  ──► stdout
    mac.rs     /usr/bin/log show|stream --style ndjson     show: keep newest N, then print
+              (simulator.rs: same, via xcrun simctl spawn)
    device.rs  usbmuxd → lockdown → os_trace_relay         stream: print until limit/duration
                                                            notes ──► stderr
 ```
@@ -26,6 +27,7 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 | `src/entry.rs` | `Entry` and `Level`: the source-independent record |
 | `src/filter.rs` | Console token parser; NSPredicate and in-process backends |
 | `src/source/mac.rs` | Spawns `/usr/bin/log`, parses ndjson into `Entry` |
+| `src/source/simulator.rs` | Lists booted simulators, resolves `--simulator`, builds `simctl spawn ... log` |
 | `src/source/device.rs` | Lists devices, resolves `--device`, streams `os_trace_relay`, copies archives |
 | `src/reports.rs` | Mac report listing, selection, crash summary rendering |
 | `src/run.rs` | `--limit` / `--duration` enforcement, stderr notes |
@@ -38,14 +40,18 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 
 `src/signals.rs` watches SIGINT/SIGTERM/SIGHUP on a worker thread (so it works even while
 the main thread is blocked writing stdout) and reports the first one to `main`. `main`
-drops the command future, which deletes temp dirs and kills child processes
-(`kill_on_drop`), then re-raises the signal with its default action so slog dies by it (a
-shell stops a script on Ctrl-C only then). A second signal, or 2 s without `main`
-finishing (typically blocked on stdout), re-raises immediately after deleting temp dirs
-registered with `signals::remove_on_force`. Signals inherited as ignored (`nohup`) are not
-handled at all. Children run in their own process group
-(`process_group(0)`), so a terminal Ctrl-C reaches only slog and cannot make a child fail
-first.
+drops the command future, which deletes temp dirs and stops child processes
+(`kill_on_drop`; `log` gets SIGTERM instead, see below), then re-raises the signal with its
+default action so slog dies by it (a shell stops a script on Ctrl-C only then). A second
+signal, or 2 s without `main` finishing (typically blocked on stdout), re-raises
+immediately after deleting temp dirs registered with `signals::remove_on_force`. Signals
+inherited as ignored (`nohup`) are not handled at all. Children run in their own process
+group (`process_group(0)`), so a terminal Ctrl-C reaches only slog and cannot make a child
+fail first.
+
+`log` children are stopped with SIGTERM (`mac::Terminating`), not SIGKILL: for a simulator
+the child is `simctl spawn`, which forwards SIGTERM to the `log` it started inside the
+simulator but cannot when SIGKILLed, leaving that `log` running.
 
 ## Filter semantics
 

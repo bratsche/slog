@@ -28,7 +28,7 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 | Crash/spin/diagnostic reports (Mac) | `slog reports list\|show` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/DiagnosticReports` | Done |
 | Crash reports (device) | `slog reports list\|show --device` | `crashreportmover` flush + `crashreportcopymobile` | Done |
 | Apple Watch crash reports | `slog reports --device` | `ProxiedDevice-*` dirs in the iPhone's report store | Not started |
-| Simulators | `--simulator` | `xcrun simctl spawn <id> log ...` | Phase 3 |
+| Simulators (booted) | `slog show\|stream --simulator` | `xcrun simctl spawn <id> log ...` | Done |
 | Apple Watch | `--device` | `companion_proxy` through the paired iPhone | Phase 4 |
 
 ### Why these mechanisms
@@ -81,7 +81,10 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 ### Phase 3
 
-- Simulators (`--simulator [UDID|NAME]`)
+- Done: simulators. `slog simulators` lists booted ones; `show|stream --simulator
+  [UDID|NAME]` runs `log` inside the simulator (`simctl spawn`), which keeps its own unified
+  log, so `--predicate` and NSPredicate filtering work as on the Mac. Simulator app crashes
+  are written to this Mac's DiagnosticReports, so `slog reports` needs no flag for them.
 - Distribution:
   - Done: packaged as `slog-cli` (binary `slog`; `slog` is taken on crates.io), README,
     LICENSE, MSRV 1.89, `cargo publish --dry-run` clean. Builds only on macOS

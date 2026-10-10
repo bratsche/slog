@@ -4,6 +4,19 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Fixed
 
+### Stopping `simctl spawn` with SIGKILL left `log` running in the simulator (found 2026-10-10)
+
+- **Symptom (found while building `--simulator`, before it shipped):** after a bounded
+  `stream --simulator` (`--duration`, `--limit`) or Ctrl-C, a `log stream` process kept
+  running in the simulator, visible on the Mac with `pgrep -fl 'log stream'`.
+- **Root cause:** tokio's `kill_on_drop` sends SIGKILL. `simctl spawn` forwards SIGTERM to
+  the process it started in the simulator, but a SIGKILLed `simctl` forwards nothing, and
+  the simulator's `log` is not its child on the Mac, so it is orphaned.
+- **Solution:** `mac::Terminating` wraps every `log` child and sends SIGTERM on drop if it
+  is still running. Same for Mac `log`, which exits on SIGTERM too.
+- **Verified:** `--duration`, `--limit`, SIGINT, and the forced exit with stdout blocked
+  all leave no `log stream` behind.
+
 ### Interrupted `show --device` left ~300 MB in `$TMPDIR` (2026-10-10)
 
 - **Symptom:** Ctrl-C, or a `timeout` (SIGTERM), during `show --device` left a
@@ -153,10 +166,15 @@ Last Updated: 2026-10-10 · Version: 0.1.0
   periodically; delete stragglers with `rm -rf "$TMPDIR"/slog-*`.
 - `log` runs in its own process group, so after `kill -9` of slog (or a forced exit) a
   quiet `log stream` (narrow predicate) keeps running until its next write fails; clean up
-  with `pkill -f 'log stream --style ndjson'`. Ctrl-Z stops only slog.
+  with `pkill -f 'log stream --style ndjson'`. Same for `stream --simulator` after `kill -9`:
+  `simctl spawn` and the simulator's `log stream` (both visible on the Mac) stay running.
+  Ctrl-Z stops only slog.
 - Non-admin users cannot read `/Library/Logs/DiagnosticReports` (`root:_analyticsusers 0770`);
   `slog reports list` skips it with a stderr note and lists only `~/Library` reports.
 - Values logged as private print as `<private>` (same as Console.app).
+- In a simulator, `log` records its own invocations with parent `launchd_sim` whoever ran
+  it, so `--simulator` hides every `simctl spawn ... log` invocation entry, not only slog's,
+  along with `launchd_sim`'s records of starting and reaping those one-shot `log` jobs.
 - `zsh` has a `log` builtin; always invoke `/usr/bin/log` by absolute path.
 - `os_trace_relay` rejects unknown level bytes with an error, ending the stream; if a future
   iOS adds a level, this surfaces as `unknown log level byte value`.

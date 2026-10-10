@@ -23,10 +23,13 @@ slog: showed the newest 2 of 37 matching entries; narrow --last/--filter or rais
 | A `.logarchive` (e.g. from a sysdiagnose) | `slog show --archive PATH` |
 | A connected iPhone or iPad, past entries | `slog show --device` |
 | A connected iPhone or iPad, live | `slog stream --device` |
-| Crash, hang and diagnostic reports (Mac or device) | `slog reports list` / `slog reports show NAME` |
+| A booted simulator, past entries or live | `slog show --simulator` / `slog stream --simulator` |
+| Crash, hang and diagnostic reports (Mac, simulator or device) | `slog reports list` / `slog reports show NAME` |
 
 Devices connect over USB (Wi-Fi via Finder's "Show this iPhone when on Wi-Fi" should also
 work, but is untested). The device must be unlocked and trusted; no `sudo` is needed.
+Simulators must be booted (`slog simulators` lists them); their app crashes are reported on
+the Mac, so plain `slog reports` includes them.
 
 ## Install
 
@@ -59,6 +62,10 @@ slog stream --duration 30s --filter 'process:MyApp -level:debug'
 slog devices
 slog stream --device --duration 1m --filter 'process:MyApp'
 slog show --device --last 10m --save-archive /tmp/phone.logarchive --filter 'process:MyApp'
+
+# Simulators
+slog simulators
+slog stream --simulator --duration 30s --filter 'process:MyApp'
 
 # Crash reports
 slog reports list --name MyApp
