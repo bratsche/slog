@@ -19,6 +19,8 @@ Sources:
   a .logarchive file   `slog show --archive PATH`
   an iPhone or iPad    `slog stream --device [UDID|NAME]` (USB or Wi-Fi; must be trusted)
 
+Crash, hang and diagnostic reports (Console.app's Reports): `slog reports`.
+
 `show` is bounded by default (last 5 minutes, newest 1000 entries). `stream` runs until
 Ctrl-C unless --duration or --limit is given; non-interactive callers should always pass
 --duration.
@@ -110,6 +112,92 @@ JSON (--json): one object per line with keys udid, connection, name, model, os_v
 error. Devices that are not trusted show an error instead of details (name, model and
 os_version are null); unlock the device and tap Trust, then retry.")]
     Devices(DevicesArgs),
+
+    /// List and print crash, hang and diagnostic reports from this Mac or an iOS device
+    #[command(
+        subcommand,
+        long_about = "\
+List and print crash, hang and diagnostic reports, like Console.app's Reports section.
+
+Mac reports come from ~/Library/Logs/DiagnosticReports and /Library/Logs/DiagnosticReports;
+device reports from the device's crash report store (top level only, as with Mac). Reports
+are named by file, e.g. MyApp-2026-10-10-084952.ips: the process, then the local time.
+
+Typical use: `slog reports list --name MyApp`, then `slog reports show <name>`."
+    )]
+    Reports(ReportsCommand),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReportsCommand {
+    /// List reports, newest first (last 7 days, at most 50 by default)
+    #[command(after_long_help = "\
+Output:
+  Text: tab-separated time (local), size in bytes, name.
+  JSON (--json): one object per line with keys name, time (RFC 3339), size, path (the
+  full path on this Mac; null for device reports).
+  A note on stderr says when --limit dropped reports.
+
+Examples:
+  slog reports list --name MyApp
+  slog reports list --last 1h
+  slog reports list --device --name MyApp --json")]
+    List(ReportsListArgs),
+
+    /// Print one report; crash reports are summarized unless --full
+    #[command(after_long_help = "\
+Crash reports (.ips files with bug_type 309) print as a summary: process and version,
+exception, termination reason, application-specific info (e.g. Swift fatal error
+messages), the last exception backtrace if any, and the crashed thread's frames. Other
+threads, register state and binary images are omitted; --full prints the original file.
+Every other report prints unchanged. Some (.diag, JetsamEvent) are large.
+
+Put NAME before --device: `--device NAME` would read NAME as the device.
+
+Examples:
+  slog reports show MyApp-2026-10-10-084952.ips
+  slog reports show MyApp-2026-10-10-084952.ips --device
+  slog reports show ~/Library/Logs/DiagnosticReports/MyApp-2026-10-10-084952.ips --full")]
+    Show(ReportsShowArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ReportsListArgs {
+    /// Only reports whose file name contains this (case-insensitive), e.g. your app's name
+    #[arg(long, value_name = "SUBSTR")]
+    pub name: Option<String>,
+
+    /// Only reports written within this long, e.g. 1h, 2d
+    #[arg(long, value_name = "DURATION", default_value = "7d")]
+    pub last: Span,
+
+    /// Print at most N reports, newest first; 0 = no limit
+    #[arg(long, value_name = "N", default_value_t = 50)]
+    pub limit: usize,
+
+    /// Print one JSON object per line instead of text
+    #[arg(long)]
+    pub json: bool,
+
+    /// List an iOS device's reports instead of this Mac's (UDID or name; no value = the
+    /// only connected device). Takes a few seconds.
+    #[arg(long, value_name = "UDID|NAME", num_args = 0..=1, default_missing_value = "")]
+    pub device: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct ReportsShowArgs {
+    /// Report name from `slog reports list`, or a path to a report file on this Mac
+    pub name: String,
+
+    /// Print the whole original file instead of a crash summary
+    #[arg(long)]
+    pub full: bool,
+
+    /// Read the report from an iOS device (UDID or name; no value = the only connected
+    /// device)
+    #[arg(long, value_name = "UDID|NAME", num_args = 0..=1, default_missing_value = "")]
+    pub device: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -299,6 +387,18 @@ mod tests {
             panic!()
         };
         assert_eq!(args.query.filter, ["-level:default"]);
+    }
+
+    #[test]
+    fn reports_show_takes_name_then_device() {
+        let cli = Cli::try_parse_from(["slog", "reports", "show", "A.ips", "--device"]).unwrap();
+        let Command::Reports(ReportsCommand::Show(args)) = cli.command else {
+            panic!()
+        };
+        assert_eq!(
+            (args.name.as_str(), args.device.as_deref()),
+            ("A.ips", Some(""))
+        );
     }
 
     #[test]

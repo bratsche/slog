@@ -27,6 +27,7 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 | `src/filter.rs` | Console token parser; NSPredicate and in-process backends |
 | `src/source/mac.rs` | Spawns `/usr/bin/log`, parses ndjson into `Entry` |
 | `src/source/device.rs` | Lists devices, resolves `--device`, streams `os_trace_relay` |
+| `src/reports.rs` | Mac report listing, selection, crash summary rendering |
 | `src/run.rs` | `--limit` / `--duration` enforcement, stderr notes |
 | `src/output.rs` | Text and JSON rendering, `--fields` |
 | `src/main.rs` | Wiring and error/exit-code handling |
@@ -70,3 +71,16 @@ Field mapping:
 - usbmuxd may list a device twice (USB and Wi-Fi); the USB entry wins.
 - `os_trace_relay` has no predicate support and streams every level; info/debug are dropped
   in-process unless requested.
+
+## Reports
+
+```text
+slog reports list  ──► Mac: read_dir(~/Library/Logs/DiagnosticReports, /Library/...)
+                   └─► device: crashreportmover flush (~2 s) → crashreportcopymobile ls + AFC stat
+                         ──► reports::select (since --last, --name, newest first, --limit) ──► stdout
+slog reports show  ──► Mac: find by name in both dirs (or a path) / device: AFC pull
+                         ──► reports::render: .ips bug_type 309 → crash summary; else unchanged
+```
+
+- Report `time` is the file's modification time (AFC returns it as UTC; converted to local).
+- Device report names are AFC paths relative to the store root; `/` is rejected.
