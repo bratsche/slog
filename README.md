@@ -99,9 +99,11 @@ Over Wi-Fi, `show --device` copies the device's log archive over the network: ab
 **Managing pairings.** `slog pair` stores one file per device in
 `~/Library/Application Support/slog/pairing/<UDID>.plist`, readable only by you: it holds
 the key that lets slog use the device's developer services, so do not share it. Running
-`slog pair` again replaces it. Delete the file to forget the device on this Mac; to revoke
-the pairing on the device itself, clear its trusted computers (Settings > Developer >
-Clear Trusted Computers, which also removes Xcode's pairings).
+`slog pair` again replaces it. Delete the file to forget the device on this Mac. slog cannot
+remove the pairing from the device itself. Apple's way to reset the computers a device
+trusts is Settings > General > Transfer or Reset iPhone > Reset > Reset Location & Privacy,
+which also resets Finder's and Xcode's trust and every app's location and privacy
+permissions; whether it also removes slog's pairing has not been verified.
 
 ### Simulators
 

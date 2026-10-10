@@ -139,8 +139,8 @@ so pairing shows no prompt. Pairing again replaces the old pairing.
 
 The pairing is stored in ~/Library/Application Support/slog/pairing/<UDID>.plist (mode
 0600: it lets its holder use the device's developer services). Delete it to forget the
-device here; Settings > Developer > Clear Trusted Computers on the device revokes it there
-(and Xcode's pairings too).
+device here. slog cannot remove the pairing from the device; see the README (\"Managing
+pairings\") for resetting the device's trusted computers.
 
 Over Wi-Fi, slog finds the device over Bonjour, so it must be awake, unlocked and on this
 Mac's network. Connecting needs macOS's Local Network permission for the app slog runs in

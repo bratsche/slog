@@ -168,6 +168,11 @@ Last Updated: 2026-10-10 · Version: 0.1.0
   Local Network permission: without it `connect()` fails with EHOSTUNREACH ("No route to
   host"), which slog's error explains. Commands run by Claude Code were denied even with
   iTerm (which hosts it) allowed; Ghostty worked as soon as it was allowed.
+- slog cannot remove its pairing from a device (`idevice` has no unpair request); deleting
+  the stored file only forgets it on the Mac. "Settings > Developer > Clear Trusted
+  Computers", suggested at first, does not exist (checked on iOS 27.0.1). Apple's documented
+  trust reset (Settings > General > Transfer or Reset > Reset > Reset Location & Privacy)
+  is untested for slog's pairing.
 - `show --device` over Wi-Fi copies ~300 MB through the in-process TCP stack: ~36 s
   (release build; ~95 s debug) versus 5-10 s over USB. Use `--save-archive` for repeated
   queries.
