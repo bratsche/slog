@@ -59,9 +59,10 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 - `slog show --device` via `CreateArchive`
 - `slog reports` for Mac and device crash/spin/diagnostic reports (`.ips` JSON)
-- `slog skill install --user|--project` and `slog skill print`: the Claude skill is embedded
-  in the binary so it always matches the installed version
-  (`~/.claude/skills/slog/SKILL.md` or `./.claude/skills/slog/SKILL.md`)
+- Done: `slog skill install --user|--project [--force]` and `slog skill print`. The skill
+  (`skill/SKILL.md`, `{{VERSION}}` filled in at runtime) is embedded in the binary so it
+  always matches the installed version. Existing files with different contents are only
+  replaced with `--force`, to protect local edits.
 
 ### Phase 2b
 
