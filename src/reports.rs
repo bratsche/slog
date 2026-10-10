@@ -62,11 +62,16 @@ pub fn find_mac(name: &str) -> Result<PathBuf> {
     if name.contains('/') {
         return Ok(PathBuf::from(name));
     }
-    let found: Vec<PathBuf> = mac_dirs()?
-        .into_iter()
-        .map(|d| d.join(name))
-        .filter(|p| p.is_file())
-        .collect();
+    let mut found = Vec::new();
+    for dir in mac_dirs()? {
+        let path = dir.join(name);
+        match fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => found.push(path),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("cannot read {}", path.display())),
+        }
+    }
     match found.len() {
         0 => bail!("no report named {name:?} on this Mac (see `slog reports list`)"),
         1 => Ok(found.into_iter().next().expect("one")),
@@ -188,6 +193,7 @@ fn crash_summary(header: &Value, body: &Value) -> Result<String> {
     );
     field(&mut out, "Codes:", s(&exc["codes"]));
     field(&mut out, "Subtype:", s(&exc["subtype"]));
+    field(&mut out, "Message:", s(&exc["message"]));
     let term = &body["termination"];
     let reasons: Vec<&str> = term["reasons"]
         .as_array()
@@ -263,8 +269,14 @@ fn write_frames(out: &mut String, frames: &[Value], images: &[Value]) -> Result<
             .as_u64()
             .and_then(|ix| images.get(ix as usize))
             .ok_or_else(|| anyhow!("frame {i} has no valid imageIndex"))?;
+        // Code outside any known binary points at a placeholder image with neither name
+        // nor path; Apple prints it as "???".
         let image_name = match s(&image["name"]) {
-            "" => s(&image["path"]).rsplit('/').next().unwrap_or("???"),
+            "" => s(&image["path"])
+                .rsplit('/')
+                .next()
+                .filter(|n| !n.is_empty())
+                .unwrap_or("???"),
             name => name,
         };
         let location = match s(&f["symbol"]) {
@@ -295,7 +307,8 @@ mod tests {
             "parentProc": "launchd", "parentPid": 1,
             "bundleInfo": {"CFBundleIdentifier": "com.example.MyApp",
                            "CFBundleShortVersionString": "1.2", "CFBundleVersion": "7"},
-            "exception": {"type": "EXC_BREAKPOINT", "signal": "SIGTRAP", "codes": "0x1, 0x2"},
+            "exception": {"type": "EXC_BREAKPOINT", "signal": "SIGTRAP", "codes": "0x1, 0x2",
+                          "message": "namespc 18 reason_code 0x5"},
             "termination": {"namespace": "SIGNAL", "code": 5, "indicator": "Trace/BPT trap: 5"},
             "asi": {"libswiftCore.dylib": ["Fatal error: Index out of range"]},
             "faultingThread": 1,
@@ -303,10 +316,12 @@ mod tests {
                 {"frames": []},
                 {"queue": "com.apple.main-thread", "frames": [
                     {"imageIndex": 0, "imageOffset": 100, "symbol": "Array.subscript.getter", "symbolLocation": 8},
-                    {"imageIndex": 1, "imageOffset": 4096, "sourceFile": "View.swift", "sourceLine": 12}
+                    {"imageIndex": 1, "imageOffset": 4096, "sourceFile": "View.swift", "sourceLine": 12},
+                    {"imageIndex": 2, "imageOffset": 0}
                 ]}
             ],
-            "usedImages": [{"name": "libswiftCore.dylib"}, {"path": "/private/var/MyApp.app/MyApp"}]
+            "usedImages": [{"name": "libswiftCore.dylib"}, {"path": "/private/var/MyApp.app/MyApp"},
+                           {"source": "A", "size": 0}]
         });
         (header, body)
     }
@@ -320,11 +335,13 @@ mod tests {
             "Identifier:  com.example.MyApp",
             "Version:     1.2 (7)",
             "Exception:   EXC_BREAKPOINT (SIGTRAP)",
+            "Message:     namespc 18 reason_code 0x5",
             "Termination: SIGNAL 5 Trace/BPT trap: 5",
             "App info:    libswiftCore.dylib: Fatal error: Index out of range",
             "Thread 1 Crashed: Dispatch queue: com.apple.main-thread",
             "0   libswiftCore.dylib               Array.subscript.getter + 8",
             "1   MyApp                            MyApp + 4096 (View.swift:12)",
+            "2   ???                              ??? + 0",
             "(1 other threads omitted",
         ] {
             assert!(out.contains(expected), "missing {expected:?} in:\n{out}");
