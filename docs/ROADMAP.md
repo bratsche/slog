@@ -82,8 +82,12 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 ### Phase 3
 
 - Simulators (`--simulator [UDID|NAME]`)
-- Distribution: crates.io (`cargo install slog-cli` or similar; `slog` is taken on
-  crates.io) and a Homebrew tap
+- Distribution:
+  - Done: packaged as `slog-cli` (binary `slog`; `slog` is taken on crates.io), README,
+    LICENSE, MSRV 1.89, `cargo publish --dry-run` clean. Builds only on macOS
+    (`compile_error!` elsewhere).
+  - Next: CI (GitHub Actions on macOS), then a `v0.1.0` release, crates.io publish and a
+    Homebrew tap formula.
 
 ### Phase 4
 

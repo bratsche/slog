@@ -1,11 +1,19 @@
 [package]
-name = "slog"
+# `slog` is taken on crates.io; the installed command is still `slog` (see [[bin]]).
+name = "slog-cli"
 version = "0.1.0"
 edition = "2024"
-description = "Console.app for the command line: read macOS and iOS unified logs from stdout"
+rust-version = "1.89"
+description = "Console.app for the command line: read macOS and iOS unified logs, and crash reports, from stdout"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/bratsche/slog"
 keywords = ["macos", "ios", "logging", "console", "oslog"]
 categories = ["command-line-utilities", "development-tools::debugging"]
+
+[[bin]]
+name = "slog"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
