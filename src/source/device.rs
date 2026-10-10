@@ -206,10 +206,20 @@ pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path
     if !status.success() {
         bail!(
             "/usr/bin/tar could not unpack the device's log archive ({status}): {}",
-            tar_errors.trim()
+            first_line_and_count(&tar_errors)
         );
     }
     Ok(())
+}
+
+/// tar prints a line per failed file (thousands when the disk fills); keep errors short.
+fn first_line_and_count(text: &str) -> String {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let first = lines.next().unwrap_or("(no output)").trim().to_string();
+    match lines.count() {
+        0 => first,
+        n => format!("{first} (and {n} more lines)"),
+    }
 }
 
 pub fn stream(selector: String, include_info: bool, include_debug: bool) -> Entries {
@@ -273,6 +283,19 @@ fn device_time(ts: NaiveDateTime) -> Result<chrono::DateTime<Local>> {
 mod tests {
     use super::*;
     use chrono::DateTime;
+
+    #[test]
+    fn tar_errors_are_shortened() {
+        assert_eq!(
+            first_line_and_count("tar: a: No space left\n"),
+            "tar: a: No space left"
+        );
+        assert_eq!(
+            first_line_and_count("tar: a: No space\ntar: b: No space\n\ntar: c: No space\n"),
+            "tar: a: No space (and 2 more lines)"
+        );
+        assert_eq!(first_line_and_count(""), "(no output)");
+    }
 
     #[test]
     fn device_time_restores_microseconds() {
