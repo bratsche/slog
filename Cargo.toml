@@ -1,0 +1,20 @@
+[package]
+name = "slog"
+version = "0.1.0"
+edition = "2024"
+description = "Console.app for the command line: read macOS and iOS unified logs from stdout"
+license = "MIT"
+keywords = ["macos", "ios", "logging", "console", "oslog"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+chrono = "0.4"
+clap = { version = "4", features = ["derive", "wrap_help"] }
+futures = "0.3"
+idevice = { version = "0.1.68", features = ["usbmuxd", "syslog_relay"] }
+plist = "1.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time"] }
