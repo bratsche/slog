@@ -46,10 +46,27 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - **Root cause:** after its `{"count":N,"finished":1}` trailer, `log show <archive>` prints a
   `==========` / archive path / `==========` block, which the ndjson parser rejected. Phase 1
   never ran `--archive` because no archive was available to test with.
-- **Solution:** `source/mac.rs::run` skips that block after the trailer (the path is
-  canonicalized, since `log` prints `/private/var/...` for `/var/...`) and forwards any other
-  post-trailer line to stderr.
+- **Solution:** `source/mac.rs::run` skips that block (the path is canonicalized, since `log`
+  prints `/private/var/...` for `/var/...`) and forwards any other post-trailer line to
+  stderr.
 - **Prevention:** `show --device` exercises the archive path on every run.
+
+### Review fixes for `show --device` (2026-10-10)
+
+- An unreadable archive reported `unexpected output from /usr/bin/log: ==========` instead
+  of `log`'s error: `log` prints the `==========` / path block even when it fails, with no
+  trailer before it. The block is now skipped wherever it appears, so the exit status and
+  stderr (`The log archive is corrupt or incomplete`) are reported.
+- `show --device` hung when tar printed more than a pipe's worth of errors (reproduced with
+  `--last 7d` and `TMPDIR` on a 20 MB disk): tar's stderr was read only after the copy, so
+  tar blocked writing it and stopped reading the archive. stderr is now drained during the
+  copy; the run ends with tar's "No space left on device" error.
+- `--last` was passed to `log` as a local time without offset, ambiguous in the hour
+  repeated when DST ends; it now includes the offset (`+zzzz`, accepted by `log`).
+- Help said `--last` with `--archive` counts from now; `log` counts back from the archive's
+  newest entry (verified on a copied device archive). Help corrected.
+- The "copying logs since" note printed only the time of day, misleading for `--last 7d`;
+  it now includes the date.
 
 ## Upstream workarounds
 

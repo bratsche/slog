@@ -92,10 +92,12 @@ async fn show(args: ShowArgs) -> Result<()> {
             let path = dir.path().join("device.logarchive");
             device::collect_archive(selector, start, &path).await?;
             _device_archive = Some(dir);
+            // With the offset: without it, a time in the hour repeated when DST ends is
+            // ambiguous.
             let start = args
                 .start
                 .clone()
-                .unwrap_or_else(|| start.format("%Y-%m-%d %H:%M:%S").to_string());
+                .unwrap_or_else(|| start.format("%Y-%m-%d %H:%M:%S%z").to_string());
             (Some(path), None, Some(start))
         }
         None => {

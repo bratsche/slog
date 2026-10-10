@@ -59,8 +59,9 @@ Field mapping:
 - Only `eventType == "logEvent"` lines become entries; activity, signpost and state events
   are skipped.
 - `log show` ends with `{"count":N,"finished":1}`; skipped. For archives, `log` then prints
-  `==========`, the canonical archive path, `==========`; skipped. Any other line after the
-  trailer is passed to stderr. Archive paths are canonicalized so the path line matches.
+  `==========`, the canonical archive path, `==========`; skipped (it is printed without a
+  trailer when `log` fails, so it is skipped anywhere). Any other line after the trailer is
+  passed to stderr. Archive paths are canonicalized so the path line matches.
 - `log stream --predicate` prints a plain-text `Filtering the log data using ...` banner
   first; skipped explicitly. Any other non-JSON line is an error.
 - `log` logs its own invocation (including the predicate) to the unified log, so entries

@@ -82,8 +82,8 @@ pub fn stream(verbosity: Verbosity, predicate: Option<String>) -> Entries {
 }
 
 /// Runs `log` and yields its entries. `archive` is the archive path `log show` was given,
-/// if any: after the end-of-output trailer it prints a `==========` / path / `==========`
-/// block, which is skipped; anything else after the trailer is passed on to stderr.
+/// if any: at the end it prints a `==========` / path / `==========` block, which is
+/// skipped; anything else after the end-of-output trailer is passed on to stderr.
 fn run(args: Vec<String>, archive: Option<String>) -> Entries {
     Box::pin(try_stream! {
         let mut child = Command::new(LOG)
@@ -104,8 +104,13 @@ fn run(args: Vec<String>, archive: Option<String>) -> Entries {
         let mut lines = BufReader::new(stdout).lines();
         let mut finished = false;
         while let Some(line) = lines.next_line().await? {
+            // Also printed with no trailer when `log` cannot read the archive; the exit
+            // status and stderr below then report why.
+            if archive.is_some() && (line == "==========" || Some(&line) == archive.as_ref()) {
+                continue;
+            }
             if finished {
-                if !(line.is_empty() || line == "==========" || Some(&line) == archive.as_ref()) {
+                if !line.is_empty() {
                     eprintln!("slog: {LOG}: {line}");
                 }
                 continue;

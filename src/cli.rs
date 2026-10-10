@@ -155,7 +155,9 @@ pub struct ShowArgs {
     #[command(flatten)]
     pub query: QueryArgs,
 
-    /// How far back from now to look, e.g. 30s, 5m, 2h, 1d [default: 5m unless --start or --archive]
+    /// How far back to look, e.g. 30s, 5m, 2h, 1d [default: 5m unless --start or --archive]
+    ///
+    /// Counts back from now, or from the archive's newest entry with --archive.
     #[arg(long, value_name = "DURATION", conflicts_with_all = ["start", "end"])]
     pub last: Option<Span>,
 
@@ -169,9 +171,10 @@ pub struct ShowArgs {
 
     /// Read a .logarchive (from `log collect` or a sysdiagnose) instead of this Mac
     ///
-    /// Without --start, every entry in the archive is read before the newest --limit are
-    /// printed; for a large archive (e.g. a sysdiagnose) that takes minutes. Pass --start
-    /// and --end to read only a window. --last is relative to now, not the archive.
+    /// Without --start or --last, every entry in the archive is read before the newest
+    /// --limit are printed; for a large archive (e.g. a sysdiagnose) that takes minutes.
+    /// Pass --start and --end to read only a window. With --archive, --last counts back
+    /// from the archive's newest entry, not from now.
     #[arg(long, value_name = "PATH")]
     pub archive: Option<PathBuf>,
 

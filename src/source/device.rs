@@ -15,6 +15,7 @@ use idevice::os_trace_relay::{LogLevel, OsTraceLog, OsTraceRelayClient};
 use idevice::provider::{IdeviceProvider, UsbmuxdProvider};
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection, UsbmuxdDevice};
 use serde::Serialize;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use super::Entries;
@@ -167,7 +168,7 @@ pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path
         .with_context(|| format!("cannot start os_trace_relay on {}", device.udid))?;
     eprintln!(
         "slog: copying logs since {} from {}...",
-        start.format("%H:%M:%S"),
+        start.format("%Y-%m-%d %H:%M:%S"),
         device.udid
     );
     let start_secs = u64::try_from(start.timestamp()).context("start time is before 1970")?;
@@ -185,17 +186,27 @@ pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path
         .spawn()
         .context("failed to run /usr/bin/tar")?;
     let mut stdin = tar.stdin.take().expect("stdin is piped");
-    let copied = client
-        .create_archive(&mut stdin, None, None, Some(start_secs))
-        .await;
-    drop(stdin);
-    let out = tar.wait_with_output().await?;
+    let mut stderr = tar.stderr.take().expect("stderr is piped");
+    // stderr is read during the copy: tar prints a line per file it cannot write (e.g. disk
+    // full), and once the pipe is full tar stops reading stdin, which stalls the copy.
+    let mut tar_errors = String::new();
+    let (copied, read) = tokio::join!(
+        async move {
+            let copied = client
+                .create_archive(&mut stdin, None, None, Some(start_secs))
+                .await;
+            drop(stdin);
+            copied
+        },
+        stderr.read_to_string(&mut tar_errors),
+    );
+    let status = tar.wait().await?;
+    read?;
     copied.with_context(|| format!("copying the log archive from {} failed", device.udid))?;
-    if !out.status.success() {
+    if !status.success() {
         bail!(
-            "/usr/bin/tar could not unpack the device's log archive ({}): {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
+            "/usr/bin/tar could not unpack the device's log archive ({status}): {}",
+            tar_errors.trim()
         );
     }
     Ok(())
