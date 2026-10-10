@@ -51,14 +51,18 @@ different fields) is AND'd.
 
 ## iOS devices
 
-- `slog devices` lists connected devices (USB, or Wi-Fi with Finder's "Show this iPhone
-  when on Wi-Fi"). An `error:` column means the device is locked or untrusted: ask the
-  user to unlock it and tap Trust.
-- `--device` with no value uses the only connected device; pass a UDID or name when
-  several are connected.
+- `slog devices` lists reachable devices: `usb`, `network` (Wi-Fi with Finder's "Show this
+  iPhone when on Wi-Fi") or `wifi` (paired with `slog pair`). An `error:` column means the
+  device is locked or untrusted: ask the user to unlock it and tap Trust.
+- To use a device over Wi-Fi without the cable, run `slog pair` once while it is connected
+  by USB. Over Wi-Fi it must be awake, unlocked and on the Mac's network; "No route to
+  host" means the user must allow their terminal app under System Settings > Privacy &
+  Security > Local Network.
+- `--device` with no value uses the only USB-connected device, or with none on USB, the only
+  paired device on the network; pass a UDID or name when several are reachable.
 - Past entries: `slog show --device --last 10m --filter 'process:MyApp level:error'`.
-  Each run copies the device's logs first (~5-10 s, ~300 MB temporary disk), so keep
-  `--last` short and prefer one well-filtered query over many small ones.
+  Each run copies the device's logs first (~5-10 s over USB, ~30-40 s over Wi-Fi; ~300 MB
+  temporary disk), so keep `--last` short and prefer one well-filtered query over many.
 - Several queries over the same period: copy once with
   `--save-archive /tmp/phone.logarchive` (the path must not exist yet), then reuse the
   `slog show --archive ... --start ...` command slog prints on stderr, adding your own
@@ -101,8 +105,8 @@ different fields) is AND'd.
 ## Limits
 
 - Values logged as private appear as `<private>`; slog cannot reveal them.
-- A device that Xcode sees only wirelessly (`xcrun devicectl list devices`) but that is not
-  in `slog devices` needs a USB cable.
+- A device that Xcode sees only wirelessly but that is not in `slog devices` must be paired
+  with slog first: ask the user to connect it by USB once and run `slog pair`.
 
 This skill was written for slog {{VERSION}}. If `slog --version` differs, update it with
 `slog skill install --force` plus `--user` or `--project`, matching where it was installed

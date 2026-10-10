@@ -21,7 +21,9 @@ use chrono::Local;
 use clap::Parser;
 use futures::StreamExt;
 
-use cli::{Cli, Command, ListArgs, QueryArgs, ReportsCommand, ShowArgs, SkillCommand, StreamArgs};
+use cli::{
+    Cli, Command, ListArgs, PairArgs, QueryArgs, ReportsCommand, ShowArgs, SkillCommand, StreamArgs,
+};
 use entry::Level;
 use filter::Filter;
 use output::Printer;
@@ -37,6 +39,7 @@ async fn main() -> ExitCode {
             Command::Stream(args) => stream(args).await,
             Command::Devices(args) => devices(args).await,
             Command::Simulators(args) => simulators(args).await,
+            Command::Pair(args) => pair(args).await,
             Command::Skill(cmd) => skill(cmd),
             Command::Reports(cmd) => reports_cmd(cmd).await,
         }
@@ -207,7 +210,10 @@ async fn stream(args: StreamArgs) -> Result<()> {
 async fn devices(args: ListArgs) -> Result<()> {
     let devices = device::list().await?;
     if devices.is_empty() {
-        eprintln!("slog: no iOS devices connected; connect one by USB and tap Trust");
+        eprintln!(
+            "slog: no iOS devices found; connect one by USB and tap Trust (run `slog pair` while \
+             connected to reach it over Wi-Fi later)"
+        );
     }
     let mut out = io::stdout().lock();
     if args.json {
@@ -230,6 +236,19 @@ async fn devices(args: ListArgs) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+async fn pair(args: PairArgs) -> Result<()> {
+    let paired = device::pair(args.device.as_deref().unwrap_or("")).await?;
+    writeln!(
+        io::stdout(),
+        "paired: {} ({}, {}); saved to {}\n`--device` now also reaches it over Wi-Fi",
+        paired.name,
+        paired.udid,
+        paired.model,
+        paired.path.display()
+    )?;
     Ok(())
 }
 

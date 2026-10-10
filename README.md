@@ -27,8 +27,11 @@ slog: showed the newest 2 of 37 matching entries; narrow --last/--filter or rais
 | Crash, hang and diagnostic reports (Mac, simulator or device) | `slog reports list` / `slog reports show NAME` |
 | A paired Apple Watch's reports, through its iPhone | `slog reports list --watch` |
 
-Devices connect over USB (Wi-Fi via Finder's "Show this iPhone when on Wi-Fi" should also
-work, but is untested). The device must be unlocked and trusted; no `sudo` is needed.
+Devices connect over USB, or over Wi-Fi: either with Finder's "Show this iPhone when on
+Wi-Fi", or after running `slog pair` once while the device is connected by USB (slog's own
+pairing, the protocol Xcode uses for wireless devices). The device must be unlocked and
+trusted; no `sudo` is needed. Over Wi-Fi, macOS asks to allow your terminal app on the
+local network the first time (System Settings > Privacy & Security > Local Network).
 Simulators must be booted (`slog simulators` lists them); their app crashes are reported on
 the Mac, so plain `slog reports` includes them.
 
@@ -61,6 +64,7 @@ slog stream --duration 30s --filter 'process:MyApp -level:debug'
 
 # iOS devices
 slog devices
+slog pair                       # once, over USB: reach the device over Wi-Fi afterwards
 slog stream --device --duration 1m --filter 'process:MyApp'
 slog show --device --last 10m --save-archive /tmp/phone.logarchive --filter 'process:MyApp'
 

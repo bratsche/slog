@@ -23,7 +23,7 @@ async-stream = "0.3"
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 futures = "0.3"
-idevice = { version = "0.1.68", features = ["usbmuxd", "syslog_relay", "crashreportcopymobile"] }
+idevice = { version = "0.1.68", features = ["usbmuxd", "syslog_relay", "crashreportcopymobile", "rsd", "remote_pairing", "tunnel_tcp_stack"] }
 libc = "0.2"
 plist = "1.8"
 serde = { version = "1", features = ["derive"] }

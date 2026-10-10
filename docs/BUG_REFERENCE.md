@@ -4,6 +4,19 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Fixed
 
+### Scanning a device's ports crashed its daemons (found 2026-10-10, never shipped)
+
+- **Symptom:** while finding the RSD port through macOS's CoreDevice tunnel, a scan of the
+  iPhone's ports 49152-65535 that sent an RSD handshake to each open port left crash
+  reports for `timed`, `dtfileserviced` and `restoreserviced` (SIGABRT, assertion
+  `posix_err` in `_xpc_remote_connection_connect_complete`).
+- **Root cause:** RemoteXPC services on the device speak RSD's protocol (HTTP/2) and abort
+  when an unexpected peer completes a connection.
+- **Solution:** the approach was dropped. slog now builds its own tunnel, whose handshake
+  names the RSD port, and only connects to ports RSD or lockdown name.
+- **Prevention:** never probe unnamed device ports; after any new device-side experiment,
+  check `slog reports list --device` for new crash reports.
+
 ### Stopping `simctl spawn` with SIGKILL left `log` running in the simulator (found 2026-10-10)
 
 - **Symptom (found while building `--simulator`, before it shipped):** after a bounded
@@ -146,9 +159,18 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Known limitations
 
-- `slog devices` only sees devices usbmuxd knows: USB, or Wi-Fi with Finder's "Show this
-  iPhone when on Wi-Fi". A phone Xcode sees wirelessly via CoreDevice is invisible until
-  Phase 2b. Check with `system_profiler SPUSBHostDataType` and `xcrun devicectl list devices`.
+- `netstat` run by anything but an interactive shell (slog, Python, bash under Claude
+  Code) prints no TCP sockets at all on macOS 27 (0 lines vs 165 from the zsh prompt), and
+  nothing with `-p tcp -f inet6`. Not a slog bug, but it ruled out finding the RSD port of
+  macOS's own CoreDevice tunnel from its open connections (see ROADMAP Phase 2b).
+- Wi-Fi devices without Finder's setting need `slog pair` first (over USB). Over Wi-Fi they
+  must be awake, unlocked and on the Mac's network (Bonjour), and the terminal app needs
+  Local Network permission: without it `connect()` fails with EHOSTUNREACH ("No route to
+  host"), which slog's error explains. Commands run by Claude Code were denied even with
+  iTerm (which hosts it) allowed; Ghostty worked as soon as it was allowed.
+- `show --device` over Wi-Fi copies ~300 MB through the in-process TCP stack: ~36 s
+  (release build; ~95 s debug) versus 5-10 s over USB. Use `--save-archive` for repeated
+  queries.
 - Intermittent: one `--device --debug` stream (iOS 27.0.1, ~4k entries/s) ended with
   `os_trace_relay stream ended: ... peer closed connection without sending TLS close_notify`.
   Not reproduced in 7 further runs at up to ~17k entries/s. The device closed the socket;

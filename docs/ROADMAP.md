@@ -23,7 +23,7 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 | This Mac, live | `slog stream` | `/usr/bin/log stream --style ndjson` | Done |
 | `.logarchive` | `slog show --archive` | `/usr/bin/log show <archive>` | Done |
 | iPhone/iPad, live (USB, usbmuxd Wi-Fi) | `slog stream --device` | `idevice` crate, `os_trace_relay` | Done |
-| iPhone/iPad seen only by Xcode/CoreDevice (Wi-Fi) | `--device` | `idevice` `rsd` + `tunnel` + `remote_pairing` | Phase 2b |
+| iPhone/iPad over Wi-Fi without Finder's setting | `slog pair` once, then `--device` | `idevice` `remote_pairing` + TLS-PSK tunnel + `jktcp` + RSD | Done |
 | iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Done |
 | Crash/spin/diagnostic reports (Mac) | `slog reports list\|show` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/DiagnosticReports` | Done |
 | Crash reports (device) | `slog reports list\|show --device` | `crashreportmover` flush + `crashreportcopymobile` | Done |
@@ -74,10 +74,18 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 ### Phase 2b
 
-- Devices reachable only over CoreDevice (what `xcrun devicectl list devices` shows as
-  "available (paired)" without USB or Finder's "Show this iPhone when on Wi-Fi"). Needs the
-  RemoteXPC tunnel path in `idevice` (`rsd`, `tunnel`, `remote_pairing`). Also the likely
-  route to Apple Watch.
+- Done: Wi-Fi devices without Finder's "Show this iPhone when on Wi-Fi", through slog's
+  own remote pairing (the protocol Xcode uses for wireless devices). `slog pair` pairs once
+  over USB (`remotepairingdeviced`; PIN 000000, no prompt) and stores the pairing in
+  `~/Library/Application Support/slog/pairing/<UDID>.plist` (0600). Over Wi-Fi: Bonjour
+  `_remotepairing._tcp`, matched by `authTag` (SipHash of the pairing's `alt_irk`),
+  pair-verify, a TLS-PSK tunnel carrying IPv6, TCP in process (`jktcp`, no root, no utun),
+  RSD at the port the tunnel names. Measured over Wi-Fi (release build): stream starts in
+  ~1 s, `reports list` ~4.7 s, `show --device` ~36 s (network-bound ~300 MB copy).
+- Rejected: reusing the tunnel macOS keeps for Xcode (`devicectl`). It works, but its RSD
+  port is unpublished and `netstat` hides other processes' sockets from non-shell callers;
+  scanning for the port crashed device daemons (see BUG_REFERENCE).
+- Still open: the Apple Watch, which `devicectl` also lists over the local network.
 
 ### Phase 3
 

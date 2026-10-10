@@ -1,4 +1,5 @@
-//! iOS devices over usbmuxd (USB or Wi-Fi), via the `idevice` crate.
+//! iOS devices over usbmuxd (USB, or Wi-Fi via Finder's setting), or over Wi-Fi through
+//! slog's own pairing and tunnel (see `remote`), via the `idevice` crate.
 //!
 //! Live logs come from `com.apple.os_trace_relay`, the service Console.app uses. It has no
 //! predicate support, so `--filter` is applied in-process by the caller.
@@ -15,14 +16,15 @@ use idevice::afc::opcode::AfcFopenMode;
 use idevice::crashreportcopymobile::{CrashReportCopyMobileClient, flush_reports};
 use idevice::lockdown::LockdownClient;
 use idevice::os_trace_relay::{LogLevel, OsTraceLog, OsTraceRelayClient};
-use idevice::provider::{IdeviceProvider, UsbmuxdProvider};
+use idevice::provider::{IdeviceProvider, RsdProvider, UsbmuxdProvider};
+use idevice::rsd::RsdHandshake;
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection, UsbmuxdDevice};
-use idevice::{IdeviceError, IdeviceService};
+use idevice::{Idevice, IdeviceError, IdeviceService, RsdService};
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use super::Entries;
+use super::{Entries, remote};
 use crate::entry::{Entry, Level, basename};
 use crate::reports::Report;
 
@@ -31,7 +33,7 @@ const LABEL: &str = "slog";
 #[derive(Debug, Serialize)]
 pub struct DeviceInfo {
     pub udid: String,
-    /// "usb" or "network".
+    /// "usb" or "network" (usbmuxd), or "wifi" (slog's own pairing; see `slog pair`).
     pub connection: String,
     pub name: Option<String>,
     /// Hardware model, e.g. iPhone16,2.
@@ -94,9 +96,11 @@ async fn lockdown_values(p: &UsbmuxdProvider) -> Result<plist::Dictionary> {
         .context("lockdown GetValue returned a non-dictionary")
 }
 
+/// usbmuxd's devices, then the devices paired with `slog pair` that are on the network.
 pub async fn list() -> Result<Vec<DeviceInfo>> {
     let mut out = Vec::new();
-    for d in connected().await? {
+    let usbmux = connected().await?;
+    for d in &usbmux {
         let mut info = DeviceInfo {
             udid: d.udid.clone(),
             connection: connection_name(&d.connection_type),
@@ -105,7 +109,7 @@ pub async fn list() -> Result<Vec<DeviceInfo>> {
             os_version: None,
             error: None,
         };
-        match lockdown_values(&provider(&d)).await {
+        match lockdown_values(&provider(d)).await {
             Ok(v) => {
                 let get = |k: &str| v.get(k).and_then(|x| x.as_string()).map(str::to_string);
                 info.name = get("DeviceName");
@@ -116,28 +120,224 @@ pub async fn list() -> Result<Vec<DeviceInfo>> {
         }
         out.push(info);
     }
+    let paired: Vec<remote::Paired> = remote::paired()?
+        .into_iter()
+        .filter(|p| !usbmux.iter().any(|u| u.udid.eq_ignore_ascii_case(&p.udid)))
+        .collect();
+    out.extend(remote::find(paired).await?.into_iter().map(|f| DeviceInfo {
+        udid: f.paired.udid,
+        connection: "wifi".into(),
+        name: Some(f.paired.name),
+        model: Some(f.paired.model),
+        // Known only once connected; `devices` does not connect.
+        os_version: None,
+        error: None,
+    }));
     Ok(out)
 }
 
-/// Resolves `--device` (UDID, name, or empty for "the only device").
-async fn select(selector: &str) -> Result<UsbmuxdDevice> {
+/// A selected device and the route to it.
+struct Connected {
+    udid: String,
+    via: Via,
+}
+
+enum Via {
+    Usbmux(UsbmuxdDevice),
+    Remote(Box<remote::Tunnel>),
+}
+
+impl Connected {
+    async fn os_trace(&mut self) -> Result<OsTraceRelayClient> {
+        match &mut self.via {
+            Via::Usbmux(d) => OsTraceRelayClient::connect(&provider(d)).await,
+            Via::Remote(t) => {
+                OsTraceRelayClient::connect_rsd(&mut t.handle, &mut t.handshake).await
+            }
+        }
+        .with_context(|| format!("cannot start os_trace_relay on {}", self.udid))
+    }
+
+    /// The device's crash report store, after asking it to move pending reports there
+    /// (`crashreportmover`, ~1-2 s), so reports written moments ago are included.
+    async fn crash_store(&mut self) -> Result<AfcClient> {
+        let udid = self.udid.clone();
+        let client = match &mut self.via {
+            Via::Usbmux(d) => {
+                let p = provider(d);
+                flush_reports(&p)
+                    .await
+                    .with_context(|| format!("cannot flush crash reports on {udid}"))?;
+                CrashReportCopyMobileClient::connect(&p).await
+            }
+            Via::Remote(t) => {
+                flush_reports_rsd(&mut t.handle, &t.handshake)
+                    .await
+                    .with_context(|| format!("cannot flush crash reports on {udid}"))?;
+                CrashReportCopyMobileClient::connect_rsd(&mut t.handle, &mut t.handshake).await
+            }
+        }
+        .with_context(|| format!("cannot open crash reports on {udid}"))?;
+        Ok(client.to_afc_client())
+    }
+}
+
+/// `flush_reports` for RSD, where the crate has none: the shim service checks in, then
+/// answers "ping" once pending reports are moved.
+async fn flush_reports_rsd(
+    provider: &mut impl RsdProvider,
+    handshake: &RsdHandshake,
+) -> Result<()> {
+    const SERVICE: &str = "com.apple.crashreportmover.shim.remote";
+    let port = handshake
+        .services
+        .get(SERVICE)
+        .with_context(|| format!("the device offers no {SERVICE}"))?
+        .port;
+    let mut idevice = Idevice::new(provider.connect_to_service_port(port).await?, LABEL);
+    idevice.rsd_checkin().await?;
+    let reply = idevice.read_raw(4).await?;
+    if reply != b"ping" {
+        bail!("crashreportmover answered {reply:02X?} instead of \"ping\"");
+    }
+    Ok(())
+}
+
+/// Resolves `--device` (UDID, name, or empty for "the only device"): usbmuxd's devices
+/// first, as they are faster to reach; then devices paired with `slog pair`, over Wi-Fi.
+async fn select(selector: &str) -> Result<Connected> {
     let devices = connected().await?;
+    let unreadable = match select_usbmux(&devices, selector).await? {
+        Usbmux::Found(d) => {
+            return Ok(Connected {
+                udid: d.udid.clone(),
+                via: Via::Usbmux(d),
+            });
+        }
+        Usbmux::NotFound { unreadable } => unreadable,
+    };
+    let found = select_remote(selector, &unreadable).await?;
+    let udid = found.paired.udid.clone();
+    Ok(Connected {
+        udid,
+        via: Via::Remote(Box::new(remote::connect(found).await?)),
+    })
+}
+
+/// The device paired with `slog pair` that `selector` names, found on the network; an
+/// empty selector means the only paired device on the network. `unreadable` lists usbmuxd
+/// devices whose names could not be read, for the error when nothing matches.
+async fn select_remote(selector: &str, unreadable: &[String]) -> Result<remote::Found> {
+    let paired: Vec<remote::Paired> = remote::paired()?
+        .into_iter()
+        .filter(|p| {
+            selector.is_empty()
+                || p.udid.eq_ignore_ascii_case(selector)
+                || p.name.eq_ignore_ascii_case(selector)
+        })
+        .collect();
+    if paired.is_empty() {
+        if selector.is_empty() {
+            bail!(
+                "no iOS devices connected; connect one by USB and tap Trust (run `slog pair` \
+                 once while it is connected to use it over Wi-Fi later)"
+            );
+        }
+        if !unreadable.is_empty() {
+            bail!(
+                "no connected device has UDID or name {selector:?}; names of some devices \
+                 could not be read: {}",
+                unreadable.join("; ")
+            );
+        }
+        bail!("no connected device has UDID or name {selector:?} (see `slog devices`)");
+    }
+    let names: Vec<String> = paired
+        .iter()
+        .map(|p| format!("{} ({})", p.name, p.udid))
+        .collect();
+    if !selector.is_empty() && paired.len() > 1 {
+        bail!(
+            "several paired devices are named {selector:?}; pass the UDID instead: {}",
+            names.join(", ")
+        );
+    }
+    let mut found = remote::find(paired).await?;
+    match found.len() {
+        1 => Ok(found.remove(0)),
+        0 => bail!(
+            "no paired device is on the network ({}); check that it is awake, unlocked and on \
+             the same Wi-Fi as this Mac",
+            names.join(", ")
+        ),
+        n => bail!(
+            "{n} paired devices are on the network; pass --device UDID|NAME: {}",
+            found
+                .iter()
+                .map(|f| format!("{} ({})", f.paired.name, f.paired.udid))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// Pairs the USB-connected device `selector` names (empty: the only one) for later use
+/// over Wi-Fi.
+pub async fn pair(selector: &str) -> Result<remote::Paired> {
+    let usb: Vec<UsbmuxdDevice> = connected()
+        .await?
+        .into_iter()
+        .filter(|d| d.connection_type == Connection::Usb)
+        .collect();
+    if usb.is_empty() {
+        bail!("no device connected by USB; `slog pair` needs a USB connection");
+    }
+    let d = match select_usbmux(&usb, selector).await? {
+        Usbmux::Found(d) => d,
+        Usbmux::NotFound { unreadable } if unreadable.is_empty() => {
+            bail!("no USB-connected device has UDID or name {selector:?} (see `slog devices`)")
+        }
+        Usbmux::NotFound { unreadable } => bail!(
+            "no USB-connected device has UDID or name {selector:?}; names of some devices \
+             could not be read: {}",
+            unreadable.join("; ")
+        ),
+    };
+    remote::pair(&provider(&d), &d.udid).await
+}
+
+enum Usbmux {
+    Found(UsbmuxdDevice),
+    /// With the devices whose names could not be read.
+    NotFound {
+        unreadable: Vec<String>,
+    },
+}
+
+/// The device among `devices` that `selector` names; an empty selector means the only one
+/// (none if there are none, an error if there are several).
+async fn select_usbmux(devices: &[UsbmuxdDevice], selector: &str) -> Result<Usbmux> {
     if selector.is_empty() {
-        return match devices.len() {
-            0 => bail!("no iOS devices connected; connect one by USB and tap Trust"),
-            1 => Ok(devices.into_iter().next().expect("one device")),
-            n => bail!("{n} devices connected; pass --device UDID|NAME (see `slog devices`)"),
+        return match devices {
+            [] => Ok(Usbmux::NotFound {
+                unreadable: Vec::new(),
+            }),
+            [one] => Ok(Usbmux::Found(one.clone())),
+            several => bail!(
+                "{} devices connected; pass --device UDID|NAME (see `slog devices`)",
+                several.len()
+            ),
         };
     }
     if let Some(d) = devices
         .iter()
         .find(|d| d.udid.eq_ignore_ascii_case(selector))
     {
-        return Ok(d.clone());
+        return Ok(Usbmux::Found(d.clone()));
     }
     let mut by_name = Vec::new();
     let mut unreadable = Vec::new();
-    for d in &devices {
+    for d in devices {
         match lockdown_values(&provider(d)).await {
             Ok(v) => {
                 if v.get("DeviceName")
@@ -151,12 +351,8 @@ async fn select(selector: &str) -> Result<UsbmuxdDevice> {
         }
     }
     match by_name.len() {
-        0 if !unreadable.is_empty() => bail!(
-            "no connected device has UDID or name {selector:?}; names of some devices could not be read: {}",
-            unreadable.join("; ")
-        ),
-        0 => bail!("no connected device has UDID or name {selector:?} (see `slog devices`)"),
-        1 => Ok(by_name.remove(0)),
+        0 => Ok(Usbmux::NotFound { unreadable }),
+        1 => Ok(Usbmux::Found(by_name.remove(0))),
         _ => bail!("several devices are named {selector:?}; pass the UDID instead"),
     }
 }
@@ -167,10 +363,8 @@ async fn select(selector: &str) -> Result<UsbmuxdDevice> {
 /// `start` matters: without it the relay sends the whole store (~3 GB, ~20 s on an
 /// iPhone); with it, only the files covering that window (~300 MB, ~5 s).
 pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path) -> Result<()> {
-    let device = select(selector).await?;
-    let mut client = OsTraceRelayClient::connect(&provider(&device))
-        .await
-        .with_context(|| format!("cannot start os_trace_relay on {}", device.udid))?;
+    let mut device = select(selector).await?;
+    let mut client = device.os_trace().await?;
     eprintln!(
         "slog: copying logs since {} from {}...",
         start.format("%Y-%m-%d %H:%M:%S"),
@@ -230,18 +424,11 @@ fn first_line_and_count(text: &str) -> String {
     }
 }
 
-/// Connects to the device's crash report store after asking it to move pending reports
-/// there (`crashreportmover`, ~1-2 s), so reports written moments ago are included.
-async fn crash_reports(selector: &str) -> Result<(UsbmuxdDevice, AfcClient)> {
-    let device = select(selector).await?;
-    let p = provider(&device);
-    flush_reports(&p)
-        .await
-        .with_context(|| format!("cannot flush crash reports on {}", device.udid))?;
-    let client = CrashReportCopyMobileClient::connect(&p)
-        .await
-        .with_context(|| format!("cannot open crash reports on {}", device.udid))?;
-    Ok((device, client.to_afc_client()))
+/// The selected device and its crash report store (see `Connected::crash_store`).
+async fn crash_reports(selector: &str) -> Result<(Connected, AfcClient)> {
+    let mut device = select(selector).await?;
+    let afc = device.crash_store().await?;
+    Ok((device, afc))
 }
 
 /// Report files in the device's crash report store.
@@ -252,7 +439,7 @@ async fn crash_reports(selector: &str) -> Result<(UsbmuxdDevice, AfcClient)> {
 /// accepts when a name is in more than one Watch directory.
 async fn stored_reports(
     afc: &mut AfcClient,
-    device: &UsbmuxdDevice,
+    device: &Connected,
     watch: bool,
 ) -> Result<Vec<Report>> {
     let dirs = if watch {
@@ -286,7 +473,7 @@ async fn stored_reports(
 /// The directories holding paired Apple Watches' reports: `ProxiedDevice-<id>/` for each
 /// Watch, and its `Retired/`, where the iPhone moves Watch reports once processed (usually
 /// within hours), so the top level mostly holds the iPhone's bookkeeping files.
-async fn watch_dirs(afc: &mut AfcClient, device: &UsbmuxdDevice) -> Result<Vec<String>> {
+async fn watch_dirs(afc: &mut AfcClient, device: &Connected) -> Result<Vec<String>> {
     let mut dirs = Vec::new();
     for name in list_dir(afc, device, "").await? {
         if name.starts_with("ProxiedDevice-") && is_dir(afc, device, &name).await? {
@@ -310,7 +497,7 @@ async fn watch_dirs(afc: &mut AfcClient, device: &UsbmuxdDevice) -> Result<Vec<S
 /// iPhone keeps in Watch directories.
 async fn report_names(
     afc: &mut AfcClient,
-    device: &UsbmuxdDevice,
+    device: &Connected,
     dir: &str,
     watch: bool,
 ) -> Result<Vec<String>> {
@@ -331,7 +518,7 @@ fn store_path(dir: &str, name: &str) -> String {
 }
 
 /// Entry names in `dir` of the crash report store ("" = top level), without `.` and `..`.
-async fn list_dir(afc: &mut AfcClient, device: &UsbmuxdDevice, dir: &str) -> Result<Vec<String>> {
+async fn list_dir(afc: &mut AfcClient, device: &Connected, dir: &str) -> Result<Vec<String>> {
     let mut names = afc
         .list_dir(format!("/{dir}"))
         .await
@@ -341,7 +528,7 @@ async fn list_dir(afc: &mut AfcClient, device: &UsbmuxdDevice, dir: &str) -> Res
 }
 
 /// Whether `path` in the crash report store is a directory; false if it does not exist.
-async fn is_dir(afc: &mut AfcClient, device: &UsbmuxdDevice, path: &str) -> Result<bool> {
+async fn is_dir(afc: &mut AfcClient, device: &Connected, path: &str) -> Result<bool> {
     match afc.get_file_info(format!("/{path}")).await {
         Ok(info) => Ok(info.st_ifmt == "S_IFDIR"),
         Err(IdeviceError::Afc(AfcError::ObjectNotFound)) => Ok(false),
@@ -422,10 +609,8 @@ fn is_watch_path(path: &str) -> bool {
 
 pub fn stream(selector: String, include_info: bool, include_debug: bool) -> Entries {
     Box::pin(try_stream! {
-        let device = select(&selector).await?;
-        let client = OsTraceRelayClient::connect(&provider(&device))
-            .await
-            .with_context(|| format!("cannot start os_trace_relay on {}", device.udid))?;
+        let mut device = select(&selector).await?;
+        let client = device.os_trace().await?;
         let mut relay = client.start_trace(None).await.context("os_trace_relay StartActivity failed")?;
         loop {
             let log = relay.next().await.context("os_trace_relay stream ended")?;
