@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "macos"))]
+compile_error!("slog reads the macOS unified log and only builds on macOS");
+
 mod cli;
 mod entry;
 mod filter;

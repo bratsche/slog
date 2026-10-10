@@ -14,6 +14,7 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 - `slog show --device --save-archive PATH`: keep the device archive copy for reuse with
   `--archive`.
+- Packaging: crate `slog-cli` (installs `slog`), README, LICENSE, `rust-version = 1.89`.
 
 ## 0.1.0 — 2026-10-09 (unreleased)
 
