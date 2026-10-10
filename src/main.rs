@@ -281,8 +281,8 @@ async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
     let mut out = io::stdout().lock();
     match cmd {
         ReportsCommand::List(args) => {
-            let all = match &args.device {
-                Some(selector) => device::list_reports(selector).await?,
+            let all = match iphone(&args.device, args.watch) {
+                Some(selector) => device::list_reports(selector, args.watch).await?,
                 None => reports::list_mac()?,
             };
             let since = Local::now() - args.last.0;
@@ -304,8 +304,8 @@ async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
             }
         }
         ReportsCommand::Show(args) => {
-            let bytes = match &args.device {
-                Some(selector) => device::pull_report(selector, &args.name).await?,
+            let bytes = match iphone(&args.device, args.watch) {
+                Some(selector) => device::pull_report(selector, &args.name, args.watch).await?,
                 None => {
                     let path = reports::find_mac(&args.name)?;
                     std::fs::read(&path)
@@ -321,6 +321,16 @@ async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The device whose crash report store `reports` reads: --device, or with --watch and no
+/// --device, the only connected device.
+fn iphone(device: &Option<String>, watch: bool) -> Option<&str> {
+    match device {
+        Some(selector) => Some(selector),
+        None if watch => Some(""),
+        None => None,
+    }
 }
 
 /// Quotes `s` for a POSIX shell when it contains anything beyond common path characters.

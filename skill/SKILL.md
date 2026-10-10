@@ -85,10 +85,13 @@ different fields) is AND'd.
 
 - `slog reports list --name MyApp` lists reports newest first (last 7 days, 50 max), as
   `time  size  name`. Add `--device` for a connected iPhone/iPad (takes a few seconds).
-- `slog reports show <name>` (add `--device` *after* the name for device reports) prints a
-  crash report as a short summary: exception, termination reason, app-specific info such as
-  Swift `Fatal error:` messages, and the crashed thread's frames. Start there; use `--full`
-  only if you need other threads or binary images.
+- `--watch` reads an Apple Watch's reports from its paired iPhone, including ones the
+  iPhone already processed (`--device` lists only the iPhone's unprocessed reports). With
+  several devices connected, add `--device <iPhone>` to pick the iPhone.
+- `slog reports show <name>` (add `--device` or `--watch` *after* the name) prints a crash
+  report as a short summary: exception, termination reason, app-specific info such as Swift
+  `Fatal error:` messages, and the crashed thread's frames. Start there; use `--full` only
+  if you need other threads or binary images.
 - Other report types (`.diag`, JetsamEvent, ...) print unchanged and can be hundreds of KB;
   check `size` in the list before showing one.
 - When debugging a crash, pair the report with the logs just before it:

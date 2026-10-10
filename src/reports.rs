@@ -18,7 +18,8 @@ pub struct Report {
     pub name: String,
     pub time: DateTime<Local>,
     pub size: u64,
-    /// Full path on this Mac; None for device reports.
+    /// Full path on this Mac; for Apple Watch reports, the path in the iPhone's crash report
+    /// store (accepted by `reports show --watch`); None for other device reports.
     pub path: Option<PathBuf>,
 }
 

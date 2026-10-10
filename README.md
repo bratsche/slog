@@ -25,6 +25,7 @@ slog: showed the newest 2 of 37 matching entries; narrow --last/--filter or rais
 | A connected iPhone or iPad, live | `slog stream --device` |
 | A booted simulator, past entries or live | `slog show --simulator` / `slog stream --simulator` |
 | Crash, hang and diagnostic reports (Mac, simulator or device) | `slog reports list` / `slog reports show NAME` |
+| A paired Apple Watch's reports, through its iPhone | `slog reports list --watch` |
 
 Devices connect over USB (Wi-Fi via Finder's "Show this iPhone when on Wi-Fi" should also
 work, but is untested). The device must be unlocked and trusted; no `sudo` is needed.
@@ -70,6 +71,7 @@ slog stream --simulator --duration 30s --filter 'process:MyApp'
 # Crash reports
 slog reports list --name MyApp
 slog reports show MyApp-2026-10-10-084952.ips
+slog reports list --watch --name MyWatchApp
 ```
 
 ### Filter syntax
