@@ -114,7 +114,7 @@ pub fn select(
                 .as_ref()
                 .is_none_or(|n| r.name.to_lowercase().contains(n))
     });
-    reports.sort_by(|a, b| b.time.cmp(&a.time));
+    reports.sort_by_key(|r| std::cmp::Reverse(r.time));
     let total = reports.len();
     if limit > 0 {
         reports.truncate(limit);
