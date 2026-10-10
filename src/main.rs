@@ -2,6 +2,7 @@ mod cli;
 mod entry;
 mod filter;
 mod output;
+mod reports;
 mod run;
 mod skill;
 mod source;
@@ -10,12 +11,14 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Local;
 use clap::Parser;
 use futures::StreamExt;
 
-use cli::{Cli, Command, DevicesArgs, QueryArgs, ShowArgs, SkillCommand, StreamArgs};
+use cli::{
+    Cli, Command, DevicesArgs, QueryArgs, ReportsCommand, ShowArgs, SkillCommand, StreamArgs,
+};
 use entry::Level;
 use filter::Filter;
 use output::Printer;
@@ -29,6 +32,7 @@ async fn main() -> ExitCode {
         Command::Stream(args) => stream(args).await,
         Command::Devices(args) => devices(args).await,
         Command::Skill(cmd) => skill(cmd),
+        Command::Reports(cmd) => reports_cmd(cmd).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -190,6 +194,52 @@ fn skill(cmd: SkillCommand) -> Result<()> {
                 skill::Installed::Unchanged => "already up to date",
             };
             writeln!(io::stdout(), "{what}: {}", path.display())?;
+        }
+    }
+    Ok(())
+}
+
+async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
+    let mut out = io::stdout().lock();
+    match cmd {
+        ReportsCommand::List(args) => {
+            let all = match &args.device {
+                Some(selector) => device::list_reports(selector).await?,
+                None => reports::list_mac()?,
+            };
+            let since = Local::now() - args.last.0;
+            let (picked, total) = reports::select(all, since, args.name.as_deref(), args.limit);
+            for r in &picked {
+                if args.json {
+                    writeln!(out, "{}", serde_json::to_string(r)?)?;
+                } else {
+                    writeln!(out, "{}", reports::text_line(r))?;
+                }
+            }
+            if total == 0 {
+                eprintln!("slog: no matching reports");
+            } else if picked.len() < total {
+                eprintln!(
+                    "slog: showed the newest {} of {total} matching reports; narrow --last/--name or raise --limit (0 = no limit)",
+                    picked.len()
+                );
+            }
+        }
+        ReportsCommand::Show(args) => {
+            let bytes = match &args.device {
+                Some(selector) => device::pull_report(selector, &args.name).await?,
+                None => {
+                    let path = reports::find_mac(&args.name)?;
+                    std::fs::read(&path)
+                        .with_context(|| format!("cannot read {}", path.display()))?
+                }
+            };
+            let name = args.name.rsplit('/').next().unwrap_or(&args.name);
+            let text = reports::render(name, &bytes, args.full)?;
+            write!(out, "{text}")?;
+            if !text.ends_with('\n') {
+                writeln!(out)?;
+            }
         }
     }
     Ok(())

@@ -25,8 +25,9 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 | iPhone/iPad, live (USB, usbmuxd Wi-Fi) | `slog stream --device` | `idevice` crate, `os_trace_relay` | Done |
 | iPhone/iPad seen only by Xcode/CoreDevice (Wi-Fi) | `--device` | `idevice` `rsd` + `tunnel` + `remote_pairing` | Phase 2b |
 | iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Done |
-| Crash/spin/diagnostic reports (Mac) | `slog reports` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/...` | Phase 2 |
-| Crash reports (device) | `slog reports --device` | `crashreportcopymobile` service | Phase 2 |
+| Crash/spin/diagnostic reports (Mac) | `slog reports list\|show` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/DiagnosticReports` | Done |
+| Crash reports (device) | `slog reports list\|show --device` | `crashreportmover` flush + `crashreportcopymobile` | Done |
+| Apple Watch crash reports | `slog reports --device` | `ProxiedDevice-*` dirs in the iPhone's report store | Not started |
 | Simulators | `--simulator` | `xcrun simctl spawn <id> log ...` | Phase 3 |
 | Apple Watch | `--device` | `companion_proxy` through the paired iPhone | Phase 4 |
 
@@ -61,7 +62,11 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
   default 5m window). Supports `--predicate`, unlike `stream --device`.
 - Possible follow-up: `--save-archive PATH` so repeated queries reuse one copy via
   `--archive` instead of re-copying each time.
-- `slog reports` for Mac and device crash/spin/diagnostic reports (`.ips` JSON)
+- Done: `slog reports list|show [--device]`. Crash reports (`.ips`, bug_type 309) print as a
+  summary (exception, termination, app-specific info, last exception backtrace, crashed
+  thread); `--full` and every other report type print the file unchanged.
+- Not included: `Retired/` and other subdirectories; Console's "Log Reports" (text logs in
+  `~/Library/Logs`, `/var/log`); Mac Analytics Data.
 - Done: `slog skill install --user|--project [--force]` and `slog skill print`. The skill
   (`skill/SKILL.md`, `{{VERSION}}` filled in at runtime) is embedded in the binary so it
   always matches the installed version. Existing files with different contents are only
@@ -82,6 +87,9 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 ### Phase 4
 
+- Apple Watch crash reports: the paired iPhone's report store has `ProxiedDevice-<id>`
+  directories with the Watch's reports; listing them is likely cheap via
+  `crashreportcopymobile`.
 - Apple Watch through the paired iPhone
 
 ## Not planned

@@ -9,6 +9,8 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - `slog show --device [UDID|NAME]`: past entries from an iOS device, copied with
   `os_trace_relay` `CreateArchive` (no `sudo`); supports `--predicate`.
 - Fix: `show --archive` failed on every archive (post-trailer banner).
+- `slog reports list|show [--device]`: crash, hang and diagnostic reports from the Mac or an
+  iOS device, with a compact crash summary (`--full` for the original file).
 
 ## 0.1.0 — 2026-10-09 (unreleased)
 

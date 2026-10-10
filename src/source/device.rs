@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use async_stream::try_stream;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Timelike, Utc};
 use idevice::IdeviceService;
+use idevice::crashreportcopymobile::{CrashReportCopyMobileClient, flush_reports};
 use idevice::lockdown::LockdownClient;
 use idevice::os_trace_relay::{LogLevel, OsTraceLog, OsTraceRelayClient};
 use idevice::provider::{IdeviceProvider, UsbmuxdProvider};
@@ -20,6 +21,7 @@ use tokio::process::Command;
 
 use super::Entries;
 use crate::entry::{Entry, Level, basename};
+use crate::reports::Report;
 
 const LABEL: &str = "slog";
 
@@ -220,6 +222,62 @@ fn first_line_and_count(text: &str) -> String {
         0 => first,
         n => format!("{first} (and {n} more lines)"),
     }
+}
+
+/// Connects to the device's crash report store after asking it to move pending reports
+/// there (`crashreportmover`, ~1-2 s), so reports written moments ago are included.
+async fn crash_reports(selector: &str) -> Result<(UsbmuxdDevice, CrashReportCopyMobileClient)> {
+    let device = select(selector).await?;
+    let p = provider(&device);
+    flush_reports(&p)
+        .await
+        .with_context(|| format!("cannot flush crash reports on {}", device.udid))?;
+    let client = CrashReportCopyMobileClient::connect(&p)
+        .await
+        .with_context(|| format!("cannot open crash reports on {}", device.udid))?;
+    Ok((device, client))
+}
+
+/// Report files at the top of the device's crash report store. Subdirectories
+/// (Retired, Assistant, ProxiedDevice-* for a paired Apple Watch) are not included.
+pub async fn list_reports(selector: &str) -> Result<Vec<Report>> {
+    let (device, mut client) = crash_reports(selector).await?;
+    let names = client
+        .ls(None)
+        .await
+        .with_context(|| format!("cannot list crash reports on {}", device.udid))?;
+    let mut afc = client.to_afc_client();
+    let mut reports = Vec::new();
+    for name in names {
+        let info = afc
+            .get_file_info(format!("/{name}"))
+            .await
+            .with_context(|| format!("cannot stat {name} on {}", device.udid))?;
+        if info.st_ifmt != "S_IFREG" {
+            continue;
+        }
+        reports.push(Report {
+            // AFC reports st_mtime as a UTC naive time.
+            time: Utc.from_utc_datetime(&info.modified).with_timezone(&Local),
+            size: info.size as u64,
+            name,
+            path: None,
+        });
+    }
+    Ok(reports)
+}
+
+pub async fn pull_report(selector: &str, name: &str) -> Result<Vec<u8>> {
+    if name.contains('/') {
+        bail!("device report names have no '/'; use a name from `slog reports list --device`");
+    }
+    let (device, mut client) = crash_reports(selector).await?;
+    client.pull(name).await.with_context(|| {
+        format!(
+            "cannot read report {name:?} on {} (see `slog reports list --device`)",
+            device.udid
+        )
+    })
 }
 
 pub fn stream(selector: String, include_info: bool, include_debug: bool) -> Entries {

@@ -47,6 +47,20 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - Help text corrected: bare words are AND'd (not OR'd as "same field" suggested), `--fields`
   replaces the defaults, exit-status details, and `devices --json` keys.
 
+### `slog reports show` review fixes (2026-10-10)
+
+- **Blank image name in crash frames.** Every real `.ips` has a placeholder `usedImages` entry
+  (`source: "A"`, `size: 0`, no name or path) for addresses outside any binary. A frame
+  pointing at it printed an empty image column and `" + <offset>"`, because
+  `"".rsplit('/').next()` is `Some("")`, so the `"???"` default never applied. Now `???`,
+  as in Apple's reports; covered by `crash_summary_shows_cause_and_crashed_thread`.
+- **Exception message dropped.** `exception.message` (e.g. EXC_GUARD details in an
+  ExcUserFault report) was not in the summary; now printed as `Message:`.
+- **Permission errors reported as "no report named X".** `find_mac` used `Path::is_file`,
+  which returns false on any error, so an unreadable DiagnosticReports directory looked like a
+  missing report. It now uses `fs::metadata` and surfaces errors other than NotFound, as
+  `list` already does.
+
 ### `--filter '-level:default'` rejected as an unknown flag
 
 - **Symptom:** `error: unexpected argument '-l' found`.
@@ -106,10 +120,13 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - Case-insensitive matching differs for some non-ASCII text: NSPredicate (Mac) uses full
   Unicode folding, so `STRASSE` matches `Straße`; the device backend uses `to_lowercase` and
   does not. Fixing this needs a Unicode case-folding crate.
-- `show --archive` without `--start` reads the whole archive; a sysdiagnose takes minutes.
+- `show --archive` without `--start` or `--last` reads the whole archive; a sysdiagnose takes
+  minutes. With `--archive`, `--last` counts back from the archive's newest entry.
 - `show --device` keeps its copied archive (~300 MB+) in `$TMPDIR/slog-*` while running and
   deletes it on exit, but not if killed (Ctrl-C, SIGKILL). macOS purges `$TMPDIR`
   periodically; delete stragglers with `rm -rf "$TMPDIR"/slog-*`.
+- Non-admin users cannot read `/Library/Logs/DiagnosticReports` (`root:_analyticsusers 0770`);
+  `slog reports list` skips it with a stderr note and lists only `~/Library` reports.
 - Values logged as private print as `<private>` (same as Console.app).
 - `zsh` has a `log` builtin; always invoke `/usr/bin/log` by absolute path.
 - `os_trace_relay` rejects unknown level bytes with an error, ending the stream; if a future
