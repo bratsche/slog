@@ -3,15 +3,19 @@
 //! Live logs come from `com.apple.os_trace_relay`, the service Console.app uses. It has no
 //! predicate support, so `--filter` is applied in-process by the caller.
 
+use std::path::Path;
+use std::process::Stdio;
+
 use anyhow::{Context, Result, bail};
 use async_stream::try_stream;
-use chrono::{Local, NaiveDateTime, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Timelike, Utc};
 use idevice::IdeviceService;
 use idevice::lockdown::LockdownClient;
 use idevice::os_trace_relay::{LogLevel, OsTraceLog, OsTraceRelayClient};
 use idevice::provider::{IdeviceProvider, UsbmuxdProvider};
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection, UsbmuxdDevice};
 use serde::Serialize;
+use tokio::process::Command;
 
 use super::Entries;
 use crate::entry::{Entry, Level, basename};
@@ -149,6 +153,52 @@ async fn select(selector: &str) -> Result<UsbmuxdDevice> {
         1 => Ok(by_name.remove(0)),
         _ => bail!("several devices are named {selector:?}; pass the UDID instead"),
     }
+}
+
+/// Copies the device's unified log from `start` onward into `dest`, a new .logarchive
+/// directory, for `log show`. The relay sends a tar stream, piped straight into tar.
+///
+/// `start` matters: without it the relay sends the whole store (~3 GB, ~20 s on an
+/// iPhone); with it, only the files covering that window (~300 MB, ~5 s).
+pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path) -> Result<()> {
+    let device = select(selector).await?;
+    let mut client = OsTraceRelayClient::connect(&provider(&device))
+        .await
+        .with_context(|| format!("cannot start os_trace_relay on {}", device.udid))?;
+    eprintln!(
+        "slog: copying logs since {} from {}...",
+        start.format("%H:%M:%S"),
+        device.udid
+    );
+    let start_secs = u64::try_from(start.timestamp()).context("start time is before 1970")?;
+    std::fs::create_dir_all(dest).with_context(|| format!("cannot create {}", dest.display()))?;
+
+    let mut tar = Command::new("/usr/bin/tar")
+        .arg("-xf")
+        .arg("-")
+        .arg("-C")
+        .arg(dest)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("failed to run /usr/bin/tar")?;
+    let mut stdin = tar.stdin.take().expect("stdin is piped");
+    let copied = client
+        .create_archive(&mut stdin, None, None, Some(start_secs))
+        .await;
+    drop(stdin);
+    let out = tar.wait_with_output().await?;
+    copied.with_context(|| format!("copying the log archive from {} failed", device.udid))?;
+    if !out.status.success() {
+        bail!(
+            "/usr/bin/tar could not unpack the device's log archive ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 pub fn stream(selector: String, include_info: bool, include_debug: bool) -> Entries {

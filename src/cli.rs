@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
+use chrono::{DateTime, Local, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 const ABOUT: &str =
@@ -17,7 +18,7 @@ one entry per line.
 Sources:
   this Mac             default for `show` and `stream`
   a .logarchive file   `slog show --archive PATH`
-  an iPhone or iPad    `slog stream --device [UDID|NAME]` (USB or Wi-Fi; must be trusted)
+  an iPhone or iPad    `slog show|stream --device [UDID|NAME]` (USB or Wi-Fi; trusted)
 
 `show` is bounded by default (last 5 minutes, newest 1000 entries). `stream` runs until
 Ctrl-C unless --duration or --limit is given; non-interactive callers should always pass
@@ -28,7 +29,7 @@ Run `slog <command> --help` for every option, the --filter syntax, and examples.
 const FILTER_HELP: &str = "\
 Filter syntax (--filter):
   Space-separated tokens, like Console.app's search field. Matching is case-insensitive
-  (full Unicode folding on the Mac; simple lowercasing on iOS devices).
+  (full Unicode folding, except simple lowercasing for `stream --device`).
     word               any of message, process, subsystem, category contains `word`
     \"two words\"        quoted phrase; quotes keep spaces and disable token syntax
     FIELD:value        FIELD contains value
@@ -46,7 +47,7 @@ Filter syntax (--filter):
 
 Raw predicates (--predicate):
   An NSPredicate passed to /usr/bin/log, AND'd with --filter. Use it for fields --filter
-  lacks (see `log help predicates`). Not available for iOS devices.
+  lacks (see `log help predicates`). Not available for `stream --device`.
     --predicate 'senderImagePath ENDSWITH \"MyFramework\"'
 
 Output:
@@ -73,7 +74,8 @@ Examples:
   slog show --last 1h --filter 'process:MyApp level:error'
   slog show --last 10m --info --filter 'subsystem:com.example.myapp' --json
   slog show --start '2026-10-09 14:00:00' --end '2026-10-09 14:05:00' --limit 0
-  slog show --archive ~/Desktop/sysdiagnose.logarchive --filter 'process:SpringBoard'";
+  slog show --archive ~/Desktop/sysdiagnose.logarchive --filter 'process:SpringBoard'
+  slog show --device --last 10m --filter 'process:MyApp level:error level:fault'";
 
 const STREAM_EXAMPLES: &str = "\
 Examples:
@@ -99,11 +101,11 @@ pub enum Command {
     #[command(after_long_help = format!("{FILTER_HELP}\n\n{STREAM_EXAMPLES}"))]
     Stream(StreamArgs),
 
-    /// List connected iOS devices and their UDIDs, for `stream --device`
+    /// List connected iOS devices and their UDIDs, for `--device`
     #[command(long_about = "\
 List every iOS device visible to usbmuxd (USB, or Wi-Fi if
 \"Show this iPhone when on Wi-Fi\" is enabled in Finder). Use the UDID or name with
-`slog stream --device`.
+`slog show --device` or `slog stream --device`.
 
 Text: tab-separated UDID, connection (usb|network), name, model, OS version.
 JSON (--json): one object per line with keys udid, connection, name, model, os_version,
@@ -121,7 +123,7 @@ pub struct QueryArgs {
     #[arg(short, long, value_name = "TOKENS", allow_hyphen_values = true, value_parser = parse_filter)]
     pub filter: Vec<String>,
 
-    /// Raw NSPredicate for /usr/bin/log, AND'd with --filter (Mac and archives only)
+    /// Raw NSPredicate for /usr/bin/log, AND'd with --filter (not for `stream --device`)
     ///
     /// Example: --predicate 'processImagePath BEGINSWITH "/Applications"'.
     /// Field list: `log help predicates`.
@@ -153,7 +155,7 @@ pub struct ShowArgs {
     #[command(flatten)]
     pub query: QueryArgs,
 
-    /// How far back to look, e.g. 30s, 5m, 2h, 1d [default: 5m unless --start or --archive]
+    /// How far back from now to look, e.g. 30s, 5m, 2h, 1d [default: 5m unless --start or --archive]
     #[arg(long, value_name = "DURATION", conflicts_with_all = ["start", "end"])]
     pub last: Option<Span>,
 
@@ -166,8 +168,27 @@ pub struct ShowArgs {
     pub end: Option<String>,
 
     /// Read a .logarchive (from `log collect` or a sysdiagnose) instead of this Mac
+    ///
+    /// Without --start, every entry in the archive is read before the newest --limit are
+    /// printed; for a large archive (e.g. a sysdiagnose) that takes minutes. Pass --start
+    /// and --end to read only a window. --last is relative to now, not the archive.
     #[arg(long, value_name = "PATH")]
     pub archive: Option<PathBuf>,
+
+    /// Read past entries from an iOS device instead of this Mac
+    ///
+    /// Value is a UDID or device name from `slog devices`. With no value, uses the only
+    /// connected device (an error if there are zero or several). Copies the device's log
+    /// archive for the requested window first: expect ~5-10 s and ~300 MB of temporary
+    /// disk for the default --last 5m, more for longer windows.
+    #[arg(
+        long,
+        value_name = "UDID|NAME",
+        num_args = 0..=1,
+        default_missing_value = "",
+        conflicts_with = "archive"
+    )]
+    pub device: Option<String>,
 
     /// Print at most N entries, keeping the newest; 0 = no limit
     ///
@@ -229,6 +250,26 @@ fn parse_filter(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
+/// Parses --start/--end in the formats `log` accepts, as local time unless an offset is
+/// given. Used where slog needs the instant itself (device archive collection).
+pub fn parse_local_time(s: &str) -> anyhow::Result<DateTime<Local>> {
+    if let Ok(t) = DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%z") {
+        return Ok(t.with_timezone(&Local));
+    }
+    let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").or_else(|_| {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").map(|d| d.and_hms_opt(0, 0, 0).expect("midnight"))
+    });
+    let Ok(naive) = naive else {
+        anyhow::bail!("{s:?} is not a time; use 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'");
+    };
+    match Local.from_local_datetime(&naive) {
+        LocalResult::Single(t) => Ok(t),
+        _ => anyhow::bail!(
+            "{s:?} is ambiguous or skipped in local time (DST change); add an offset, e.g. '{s}-0400'"
+        ),
+    }
+}
+
 /// A duration written as a number and unit: 30s, 5m, 2h, 1d.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span(pub Duration);
@@ -284,6 +325,21 @@ mod tests {
     }
 
     #[test]
+    fn local_time_parsing() {
+        let t = parse_local_time("2026-10-09 14:05:06").unwrap();
+        assert_eq!(
+            t.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-10-09 14:05:06"
+        );
+        let d = parse_local_time("2026-10-09").unwrap();
+        assert_eq!(d.format("%H:%M:%S").to_string(), "00:00:00");
+        let z = parse_local_time("2026-10-09 14:05:06+0000").unwrap();
+        assert_eq!(z.timestamp(), 1_791_554_706);
+        assert!(parse_local_time("yesterday").is_err());
+        assert!(parse_local_time("2026-10-09T14:05:06").is_err());
+    }
+
+    #[test]
     fn device_flag_without_value_means_only_device() {
         let cli = Cli::try_parse_from(["slog", "stream", "--device", "--duration", "5s"]).unwrap();
         let Command::Stream(args) = cli.command else {
@@ -299,6 +355,12 @@ mod tests {
             panic!()
         };
         assert_eq!(args.query.filter, ["-level:default"]);
+    }
+
+    #[test]
+    fn show_device_allows_predicate_but_not_archive() {
+        assert!(Cli::try_parse_from(["slog", "show", "--device", "--predicate", "a == 1"]).is_ok());
+        assert!(Cli::try_parse_from(["slog", "show", "--device", "--archive", "x"]).is_err());
     }
 
     #[test]

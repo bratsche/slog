@@ -26,7 +26,7 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 | `src/entry.rs` | `Entry` and `Level`: the source-independent record |
 | `src/filter.rs` | Console token parser; NSPredicate and in-process backends |
 | `src/source/mac.rs` | Spawns `/usr/bin/log`, parses ndjson into `Entry` |
-| `src/source/device.rs` | Lists devices, resolves `--device`, streams `os_trace_relay` |
+| `src/source/device.rs` | Lists devices, resolves `--device`, streams `os_trace_relay`, copies archives |
 | `src/run.rs` | `--limit` / `--duration` enforcement, stderr notes |
 | `src/output.rs` | Text and JSON rendering, `--fields` |
 | `src/main.rs` | Wiring and error/exit-code handling |
@@ -58,7 +58,9 @@ Field mapping:
 
 - Only `eventType == "logEvent"` lines become entries; activity, signpost and state events
   are skipped.
-- `log show` ends with `{"count":N,"finished":1}`; skipped.
+- `log show` ends with `{"count":N,"finished":1}`; skipped. For archives, `log` then prints
+  `==========`, the canonical archive path, `==========`; skipped. Any other line after the
+  trailer is passed to stderr. Archive paths are canonicalized so the path line matches.
 - `log stream --predicate` prints a plain-text `Filtering the log data using ...` banner
   first; skipped explicitly. Any other non-JSON line is an error.
 - `log` logs its own invocation (including the predicate) to the unified log, so entries
@@ -66,6 +68,12 @@ Field mapping:
 - Non-zero exit (e.g. 64 for a bad predicate) becomes an error carrying `log`'s stderr.
 
 ## Device notes
+
+- `show --device` copies a log archive with `os_trace_relay` `CreateArchive` (a tar stream,
+  piped into `/usr/bin/tar -x` in a temp dir), then reads it like `--archive`. `StartTime`
+  (unix seconds) is always sent: without it the device sends its whole store (~3 GB, ~20 s
+  on an iPhone); with it, the files covering the window (~300 MB minimum, ~5 s). `--last`
+  is converted to an explicit `--start` so `log` never interprets it relative to an archive.
 
 - usbmuxd may list a device twice (USB and Wi-Fi); the USB entry wins.
 - `os_trace_relay` has no predicate support and streams every level; info/debug are dropped

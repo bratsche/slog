@@ -34,7 +34,7 @@ pub struct ShowQuery {
     pub predicate: Option<String>,
 }
 
-pub fn show(q: ShowQuery) -> Entries {
+pub fn show(q: ShowQuery) -> Result<Entries> {
     let mut args = vec!["show".to_string(), "--style".into(), "ndjson".into()];
     match q.verbosity {
         Verbosity::Default => {}
@@ -51,10 +51,21 @@ pub fn show(q: ShowQuery) -> Entries {
             args.extend([flag.into(), v]);
         }
     }
-    if let Some(archive) = q.archive {
-        args.push(archive.to_string_lossy().into_owned());
+    // Canonical, because `log` echoes the resolved path (e.g. /private/var/...) after the
+    // trailer and `run` recognizes it by exact match.
+    let archive = match q.archive {
+        Some(a) => Some(
+            std::fs::canonicalize(&a)
+                .with_context(|| format!("cannot open archive {}", a.display()))?
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        None => None,
+    };
+    if let Some(a) = &archive {
+        args.push(a.clone());
     }
-    run(args)
+    Ok(run(args, archive))
 }
 
 pub fn stream(verbosity: Verbosity, predicate: Option<String>) -> Entries {
@@ -67,10 +78,13 @@ pub fn stream(verbosity: Verbosity, predicate: Option<String>) -> Entries {
     if let Some(p) = predicate {
         args.extend(["--predicate".into(), p]);
     }
-    run(args)
+    run(args, None)
 }
 
-fn run(args: Vec<String>) -> Entries {
+/// Runs `log` and yields its entries. `archive` is the archive path `log show` was given,
+/// if any: after the end-of-output trailer it prints a `==========` / path / `==========`
+/// block, which is skipped; anything else after the trailer is passed on to stderr.
+fn run(args: Vec<String>, archive: Option<String>) -> Entries {
     Box::pin(try_stream! {
         let mut child = Command::new(LOG)
             .args(&args)
@@ -88,7 +102,15 @@ fn run(args: Vec<String>) -> Entries {
         });
 
         let mut lines = BufReader::new(stdout).lines();
+        let mut finished = false;
         while let Some(line) = lines.next_line().await? {
+            if finished {
+                if !(line.is_empty() || line == "==========" || Some(&line) == archive.as_ref()) {
+                    eprintln!("slog: {LOG}: {line}");
+                }
+                continue;
+            }
+            finished = is_trailer(&line);
             match parse_line(&line)? {
                 Some(entry) if !is_slog_invocation(&entry) => yield entry,
                 _ => {}
@@ -101,6 +123,11 @@ fn run(args: Vec<String>) -> Entries {
             Err(anyhow!("{LOG} {} failed ({status}): {}", args[0], stderr.trim()))?;
         }
     })
+}
+
+/// `{"count":N,"finished":1}`, the last ndjson line of `log show`.
+fn is_trailer(line: &str) -> bool {
+    line.starts_with("{\"count\":") && line.ends_with(",\"finished\":1}")
 }
 
 /// `log` records each invocation, predicate included, in the unified log. Without this,
@@ -206,6 +233,8 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(is_trailer(r#"{"count":2979,"finished":1}"#));
+        assert!(!is_trailer(SAMPLE));
         assert!(
             parse_line(r#"{"eventType":"activityCreateEvent"}"#)
                 .unwrap()

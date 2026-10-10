@@ -40,6 +40,17 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - **Solution:** `allow_hyphen_values = true` on `--filter`; covered by
   `cli::tests::filter_may_start_with_negation`.
 
+### `show --archive` failed on every archive (found 2026-10-10)
+
+- **Symptom:** `unexpected output from /usr/bin/log: ==========`.
+- **Root cause:** after its `{"count":N,"finished":1}` trailer, `log show <archive>` prints a
+  `==========` / archive path / `==========` block, which the ndjson parser rejected. Phase 1
+  never ran `--archive` because no archive was available to test with.
+- **Solution:** `source/mac.rs::run` skips that block after the trailer (the path is
+  canonicalized, since `log` prints `/private/var/...` for `/var/...`) and forwards any other
+  post-trailer line to stderr.
+- **Prevention:** `show --device` exercises the archive path on every run.
+
 ## Upstream workarounds
 
 ### `idevice` 0.1.68: device timestamps lose sub-second precision
@@ -64,6 +75,10 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - Case-insensitive matching differs for some non-ASCII text: NSPredicate (Mac) uses full
   Unicode folding, so `STRASSE` matches `Straße`; the device backend uses `to_lowercase` and
   does not. Fixing this needs a Unicode case-folding crate.
+- `show --archive` without `--start` reads the whole archive; a sysdiagnose takes minutes.
+- `show --device` keeps its copied archive (~300 MB+) in `$TMPDIR/slog-*` while running and
+  deletes it on exit, but not if killed (Ctrl-C, SIGKILL). macOS purges `$TMPDIR`
+  periodically; delete stragglers with `rm -rf "$TMPDIR"/slog-*`.
 - Values logged as private print as `<private>` (same as Console.app).
 - `zsh` has a `log` builtin; always invoke `/usr/bin/log` by absolute path.
 - `os_trace_relay` rejects unknown level bytes with an error, ending the stream; if a future
