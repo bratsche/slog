@@ -143,9 +143,9 @@ device here; Settings > Developer > Clear Trusted Computers on the device revoke
 (and Xcode's pairings too).
 
 Over Wi-Fi, slog finds the device over Bonjour, so it must be awake, unlocked and on this
-Mac's network. macOS asks to allow your terminal app on the local network the first time
-(System Settings > Privacy & Security > Local Network); without that, connecting fails
-with \"No route to host\".
+Mac's network. Connecting needs macOS's Local Network permission for the app slog runs in
+(your terminal, editor or AI agent host): without it, connecting fails with \"No route to
+host\"; allow the app in System Settings > Privacy & Security > Local Network and retry.
 
 Examples:
   slog pair                 the only USB-connected device
