@@ -3,6 +3,7 @@ mod entry;
 mod filter;
 mod output;
 mod run;
+mod skill;
 mod source;
 
 use std::io::{self, Write};
@@ -14,7 +15,7 @@ use chrono::Local;
 use clap::Parser;
 use futures::StreamExt;
 
-use cli::{Cli, Command, DevicesArgs, QueryArgs, ShowArgs, StreamArgs};
+use cli::{Cli, Command, DevicesArgs, QueryArgs, ShowArgs, SkillCommand, StreamArgs};
 use entry::Level;
 use filter::Filter;
 use output::Printer;
@@ -27,6 +28,7 @@ async fn main() -> ExitCode {
         Command::Show(args) => show(args).await,
         Command::Stream(args) => stream(args).await,
         Command::Devices(args) => devices(args).await,
+        Command::Skill(cmd) => skill(cmd),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -168,6 +170,26 @@ async fn devices(args: DevicesArgs) -> Result<()> {
                     d.os_version.as_deref().unwrap_or(""),
                 )?,
             }
+        }
+    }
+    Ok(())
+}
+
+fn skill(cmd: SkillCommand) -> Result<()> {
+    match cmd {
+        SkillCommand::Print => write!(io::stdout(), "{}", skill::contents())?,
+        SkillCommand::Install(args) => {
+            let path = if args.user {
+                skill::user_path()?
+            } else {
+                skill::project_path()
+            };
+            let what = match skill::install(&path, args.force)? {
+                skill::Installed::Created => "installed",
+                skill::Installed::Updated => "updated",
+                skill::Installed::Unchanged => "already up to date",
+            };
+            writeln!(io::stdout(), "{what}: {}", path.display())?;
         }
     }
     Ok(())

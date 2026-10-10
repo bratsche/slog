@@ -29,6 +29,7 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 | `src/source/device.rs` | Lists devices, resolves `--device`, streams `os_trace_relay`, copies archives |
 | `src/run.rs` | `--limit` / `--duration` enforcement, stderr notes |
 | `src/output.rs` | Text and JSON rendering, `--fields` |
+| `src/skill.rs` | Embedded Claude skill (`skill/SKILL.md`): print and install |
 | `src/main.rs` | Wiring and error/exit-code handling |
 
 ## Filter semantics

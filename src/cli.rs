@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 const ABOUT: &str =
     "Console.app for the command line: print macOS and iOS unified log entries to stdout.";
@@ -112,6 +112,48 @@ JSON (--json): one object per line with keys udid, connection, name, model, os_v
 error. Devices that are not trusted show an error instead of details (name, model and
 os_version are null); unlock the device and tap Trust, then retry.")]
     Devices(DevicesArgs),
+
+    /// Install or print the Claude skill that teaches Claude how to use slog
+    #[command(
+        subcommand,
+        long_about = "\
+Install or print the Claude skill that teaches Claude how to use slog. The skill is built
+into this binary, so it always matches this slog version; after upgrading slog, re-run
+`slog skill install --force` with the same --user or --project to replace the old version."
+    )]
+    Skill(SkillCommand),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillCommand {
+    /// Write SKILL.md to ~/.claude/skills/slog/ (--user) or ./.claude/skills/slog/ (--project)
+    #[command(long_about = "\
+Write the skill's SKILL.md for Claude Code.
+  --user      ~/.claude/skills/slog/SKILL.md (all projects)
+  --project   ./.claude/skills/slog/SKILL.md, relative to the current directory (run it from
+              the repository root; commit the file to share it)
+An existing file that already matches is left alone. One with different contents (an
+older version or local edits) is only replaced with --force.")]
+    Install(SkillInstallArgs),
+
+    /// Print SKILL.md to stdout, e.g. to install it somewhere else
+    Print,
+}
+
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("location").required(true).args(["user", "project"])))]
+pub struct SkillInstallArgs {
+    /// Install for all projects: ~/.claude/skills/slog/SKILL.md
+    #[arg(long)]
+    pub user: bool,
+
+    /// Install for this project: ./.claude/skills/slog/SKILL.md
+    #[arg(long)]
+    pub project: bool,
+
+    /// Overwrite an existing SKILL.md whose contents differ
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]
@@ -364,6 +406,13 @@ mod tests {
     fn show_device_allows_predicate_but_not_archive() {
         assert!(Cli::try_parse_from(["slog", "show", "--device", "--predicate", "a == 1"]).is_ok());
         assert!(Cli::try_parse_from(["slog", "show", "--device", "--archive", "x"]).is_err());
+    }
+
+    #[test]
+    fn skill_install_needs_exactly_one_location() {
+        assert!(Cli::try_parse_from(["slog", "skill", "install"]).is_err());
+        assert!(Cli::try_parse_from(["slog", "skill", "install", "--user", "--project"]).is_err());
+        assert!(Cli::try_parse_from(["slog", "skill", "install", "--project", "--force"]).is_ok());
     }
 
     #[test]

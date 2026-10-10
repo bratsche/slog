@@ -4,6 +4,8 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Unreleased
 
+- `slog skill install --user|--project [--force]` and `slog skill print`: the Claude skill
+  for slog, embedded in the binary.
 - `slog show --device [UDID|NAME]`: past entries from an iOS device, copied with
   `os_trace_relay` `CreateArchive` (no `sudo`); supports `--predicate`.
 - Fix: `show --archive` failed on every archive (post-trailer banner).
