@@ -60,8 +60,8 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 - Done: `slog show --device` via `CreateArchive` (~5-10 s, ~300 MB temporary for the
   default 5m window). Supports `--predicate`, unlike `stream --device`.
-- Possible follow-up: `--save-archive PATH` so repeated queries reuse one copy via
-  `--archive` instead of re-copying each time.
+- Done: `show --device --save-archive PATH` keeps the copy so repeated queries reuse it via
+  `--archive` (~1 s) instead of re-copying (~5-10 s) each time.
 - Done: `slog reports list|show [--device]`. Crash reports (`.ips`, bug_type 309) print as a
   summary (exception, termination, app-specific info, last exception backtrace, crashed
   thread); `--full` and every other report type print the file unchanged.

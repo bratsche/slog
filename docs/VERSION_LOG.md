@@ -12,6 +12,9 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - `slog reports list|show [--device]`: crash, hang and diagnostic reports from the Mac or an
   iOS device, with a compact crash summary (`--full` for the original file).
 
+- `slog show --device --save-archive PATH`: keep the device archive copy for reuse with
+  `--archive`.
+
 ## 0.1.0 — 2026-10-09 (unreleased)
 
 - Initial project: `show`, `stream`, `devices` commands.

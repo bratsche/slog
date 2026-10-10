@@ -9,6 +9,7 @@ mod skill;
 mod source;
 
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -111,18 +112,45 @@ async fn show(args: ShowArgs) -> Result<()> {
                 (None, Some(s)) => cli::parse_local_time(s)?,
                 (None, None) => Local::now() - Duration::from_secs(300),
             };
-            let dir = tempfile::Builder::new().prefix("slog-").tempdir()?;
-            signals::remove_on_force(dir.path().to_path_buf());
-            let path = dir.path().join("device.logarchive");
-            device::collect_archive(selector, start, &path).await?;
-            _device_archive = Some(dir);
             // With the offset: without it, a time in the hour repeated when DST ends is
             // ambiguous.
-            let start = args
+            let log_start = args
                 .start
                 .clone()
                 .unwrap_or_else(|| start.format("%Y-%m-%d %H:%M:%S%z").to_string());
-            (Some(path), None, Some(start))
+            let path = match &args.save_archive {
+                Some(path) => {
+                    std::fs::create_dir(path)
+                        .with_context(|| format!("cannot create {}", path.display()))?;
+                    // Deleted if the copy fails or slog is interrupted; kept once complete.
+                    let incomplete = IncompleteDir::new(path.clone());
+                    device::collect_archive(selector, start, path).await?;
+                    incomplete.keep();
+                    // The exact window just copied. Not --last: with --archive it counts back
+                    // from the archive's newest entry, written seconds after `start`.
+                    let mut window = format!("--start {}", shell_quote(&log_start));
+                    if let Some(end) = &args.end {
+                        window.push_str(&format!(" --end {}", shell_quote(end)));
+                    }
+                    let shown = std::path::absolute(path)?;
+                    eprintln!(
+                        "slog: saved the device's logs to {}; query them again with: \
+                         slog show --archive {} {window} ...",
+                        shown.display(),
+                        shell_quote(&shown.to_string_lossy())
+                    );
+                    path.clone()
+                }
+                None => {
+                    let dir = tempfile::Builder::new().prefix("slog-").tempdir()?;
+                    signals::remove_on_force(dir.path().to_path_buf());
+                    let path = dir.path().join("device.logarchive");
+                    device::collect_archive(selector, start, &path).await?;
+                    _device_archive = Some(dir);
+                    path
+                }
+            };
+            (Some(path), None, Some(log_start))
         }
         None => {
             let last = match (args.last, &args.start, &args.archive) {
@@ -261,4 +289,61 @@ async fn reports_cmd(cmd: ReportsCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Quotes `s` for a POSIX shell when it contains anything beyond common path characters.
+fn shell_quote(s: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "/._-+,:@%=".contains(c);
+    if !s.is_empty() && s.chars().all(plain) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+/// A directory being filled that is deleted unless `keep` is called, including when slog is
+/// interrupted (dropped with the command, or by the signal watcher on a forced exit).
+struct IncompleteDir(Option<PathBuf>);
+
+impl IncompleteDir {
+    fn new(path: PathBuf) -> IncompleteDir {
+        signals::remove_on_force(path.clone());
+        IncompleteDir(Some(path))
+    }
+
+    fn keep(mut self) {
+        if let Some(path) = self.0.take() {
+            signals::keep_on_force(&path);
+        }
+    }
+}
+
+impl Drop for IncompleteDir {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_dir_all(&path);
+            signals::keep_on_force(&path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_quote;
+
+    #[test]
+    fn shell_quoting() {
+        assert_eq!(
+            shell_quote("/tmp/phone.logarchive"),
+            "/tmp/phone.logarchive"
+        );
+        assert_eq!(
+            shell_quote("2026-10-10 12:05:47-0400"),
+            "'2026-10-10 12:05:47-0400'"
+        );
+        assert_eq!(
+            shell_quote("/tmp/it's.logarchive"),
+            "'/tmp/it'\\''s.logarchive'"
+        );
+    }
 }

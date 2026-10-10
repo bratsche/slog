@@ -58,6 +58,12 @@ different fields) is AND'd.
 - Past entries: `slog show --device --last 10m --filter 'process:MyApp level:error'`.
   Each run copies the device's logs first (~5-10 s, ~300 MB temporary disk), so keep
   `--last` short and prefer one well-filtered query over many small ones.
+- Several queries over the same period: copy once with
+  `--save-archive /tmp/phone.logarchive` (the path must not exist yet), then reuse the
+  `slog show --archive ... --start ...` command slog prints on stderr, adding your own
+  `--filter` (~1 s per query). Keep its `--start`: `--last` on an archive counts from the
+  archive's newest entry and silently drops the first seconds. Delete the archive
+  (`rm -rf /tmp/phone.logarchive`, ~300 MB) when done.
 - Live entries: `slog stream --device --duration 30s --filter 'process:MyApp'`.
 - Devices produce far more output than Macs with `--debug` (10k+ entries/s); always filter
   by process or subsystem.
