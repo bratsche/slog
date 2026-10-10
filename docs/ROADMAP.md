@@ -87,8 +87,9 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
     LICENSE, MSRV 1.89, `cargo publish --dry-run` clean. Builds only on macOS
     (`compile_error!` elsewhere).
   - Done: CI (GitHub Actions on macOS: fmt, clippy, tests, smoke runs, MSRV).
-  - Done: release `v0.1.0`: git tag and GitHub release, Homebrew tap `bratsche/homebrew-tap`
-    (formula builds from source), crates.io `slog-cli` (published by the maintainer).
+  - On hold until more features land: release `v0.1.0` (git tag and GitHub release,
+    Homebrew tap `bratsche/homebrew-tap` with a from-source formula, crates.io `slog-cli`
+    published by the maintainer). The formula is drafted and passed `brew test`/`audit`.
 
 ### Phase 4
 
