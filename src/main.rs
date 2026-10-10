@@ -21,13 +21,11 @@ use chrono::Local;
 use clap::Parser;
 use futures::StreamExt;
 
-use cli::{
-    Cli, Command, DevicesArgs, QueryArgs, ReportsCommand, ShowArgs, SkillCommand, StreamArgs,
-};
+use cli::{Cli, Command, ListArgs, QueryArgs, ReportsCommand, ShowArgs, SkillCommand, StreamArgs};
 use entry::Level;
 use filter::Filter;
 use output::Printer;
-use source::{device, mac};
+use source::{device, mac, simulator};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -38,12 +36,13 @@ async fn main() -> ExitCode {
             Command::Show(args) => show(args).await,
             Command::Stream(args) => stream(args).await,
             Command::Devices(args) => devices(args).await,
+            Command::Simulators(args) => simulators(args).await,
             Command::Skill(cmd) => skill(cmd),
             Command::Reports(cmd) => reports_cmd(cmd).await,
         }
     };
     // On a signal, the command is dropped when this select! completes (deleting temp dirs,
-    // killing children); only then does slog die by the signal. See `signals`.
+    // stopping children); only then does slog die by the signal. See `signals`.
     let outcome = tokio::select! {
         result = command => Ok(result),
         Ok(sig) = signal => Err(sig),
@@ -104,6 +103,7 @@ impl Query {
 
 async fn show(args: ShowArgs) -> Result<()> {
     let query = Query::new(&args.query)?;
+    let target = target(&args.simulator).await?;
     // Holds a device's copied archive until printing is done; deleted on drop.
     let mut _device_archive = None;
     let (archive, last, start) = match &args.device {
@@ -165,6 +165,7 @@ async fn show(args: ShowArgs) -> Result<()> {
         }
     };
     let entries = mac::show(mac::ShowQuery {
+        target,
         archive,
         last,
         start,
@@ -187,7 +188,11 @@ async fn stream(args: StreamArgs) -> Result<()> {
                 .filter(move |e| std::future::ready(e.as_ref().map_or(true, |e| filter.matches(e))))
                 .boxed()
         }
-        None => mac::stream(query.verbosity, query.predicate(&args.query.predicate)),
+        None => mac::stream(
+            target(&args.simulator).await?,
+            query.verbosity,
+            query.predicate(&args.query.predicate),
+        ),
     };
     let mut printer = Printer::new(args.query.json, &args.query.fields);
     run::stream(
@@ -199,7 +204,7 @@ async fn stream(args: StreamArgs) -> Result<()> {
     .await
 }
 
-async fn devices(args: DevicesArgs) -> Result<()> {
+async fn devices(args: ListArgs) -> Result<()> {
     let devices = device::list().await?;
     if devices.is_empty() {
         eprintln!("slog: no iOS devices connected; connect one by USB and tap Trust");
@@ -226,6 +231,30 @@ async fn devices(args: DevicesArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+async fn simulators(args: ListArgs) -> Result<()> {
+    let sims = simulator::list().await?;
+    if sims.is_empty() {
+        eprintln!("slog: no booted simulators; boot one in Xcode or with `xcrun simctl boot NAME`");
+    }
+    let mut out = io::stdout().lock();
+    for s in &sims {
+        if args.json {
+            writeln!(out, "{}", serde_json::to_string(s)?)?;
+        } else {
+            writeln!(out, "{}\t{}\t{}", s.udid, s.name, s.os)?;
+        }
+    }
+    Ok(())
+}
+
+/// The Mac, or the booted simulator --simulator names.
+async fn target(simulator: &Option<String>) -> Result<mac::Target> {
+    Ok(match simulator {
+        Some(selector) => mac::Target::Simulator(simulator::select(selector).await?),
+        None => mac::Target::Mac,
+    })
 }
 
 fn skill(cmd: SkillCommand) -> Result<()> {

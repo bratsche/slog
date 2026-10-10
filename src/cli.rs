@@ -19,8 +19,10 @@ Sources:
   this Mac             default for `show` and `stream`
   a .logarchive file   `slog show --archive PATH`
   an iPhone or iPad    `slog show|stream --device [UDID|NAME]` (USB or Wi-Fi; trusted)
+  a booted simulator   `slog show|stream --simulator [UDID|NAME]`
 
-Crash, hang and diagnostic reports (Console.app's Reports): `slog reports`.
+Crash, hang and diagnostic reports (Console.app's Reports): `slog reports`. Apps crashing
+in a simulator are reported on this Mac, so `slog reports` lists them too.
 
 `show` is bounded by default (last 5 minutes, newest 1000 entries). `stream` runs until
 Ctrl-C unless --duration or --limit is given; non-interactive callers should always pass
@@ -83,13 +85,15 @@ Examples:
   slog show --archive ~/Desktop/sysdiagnose.logarchive --filter 'process:SpringBoard'
   slog show --device --last 10m --filter 'process:MyApp level:error level:fault'
   slog show --device --last 1h --save-archive /tmp/phone.logarchive --filter 'process:MyApp'
-    then repeat queries with the `slog show --archive ... --start ...` command it prints";
+    then repeat queries with the `slog show --archive ... --start ...` command it prints
+  slog show --simulator --last 10m --filter 'process:MyApp'";
 
 const STREAM_EXAMPLES: &str = "\
 Examples:
   slog stream --duration 30s --filter 'process:MyApp'
   slog stream --device --duration 1m --filter 'process:MyApp -level:debug'
   slog stream --device 00008110-001A2B3C4D5E801E --limit 200 --json
+  slog stream --simulator 'iPhone 17 Pro' --duration 30s --filter 'subsystem:com.example.myapp'
   slog stream --debug --duration 10s --filter 'subsystem:com.example.myapp'";
 
 #[derive(Parser, Debug)]
@@ -119,7 +123,17 @@ Text: tab-separated UDID, connection (usb|network), name, model, OS version.
 JSON (--json): one object per line with keys udid, connection, name, model, os_version,
 error. Devices that are not trusted show an error instead of details (name, model and
 os_version are null); unlock the device and tap Trust, then retry.")]
-    Devices(DevicesArgs),
+    Devices(ListArgs),
+
+    /// List booted simulators and their UDIDs, for `--simulator`
+    #[command(long_about = "\
+List booted simulators (iOS, watchOS, tvOS, visionOS), as reported by `xcrun simctl`.
+Use the UDID or name with `slog show --simulator` or `slog stream --simulator`. Shut-down
+simulators have no running log; boot one in Xcode or with `xcrun simctl boot NAME`.
+
+Text: tab-separated UDID, name, OS (e.g. iOS 26.5).
+JSON (--json): one object per line with keys udid, name, os.")]
+    Simulators(ListArgs),
 
     /// Install or print the Claude skill that teaches Claude how to use slog
     #[command(
@@ -312,7 +326,7 @@ pub struct ShowArgs {
     /// --limit are printed; for a large archive (e.g. a sysdiagnose) that takes minutes.
     /// Pass --start and --end to read only a window. With --archive, --last counts back
     /// from the archive's newest entry, not from now.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with = "save_archive")]
     pub archive: Option<PathBuf>,
 
     /// Read past entries from an iOS device instead of this Mac
@@ -329,6 +343,20 @@ pub struct ShowArgs {
         conflicts_with = "archive"
     )]
     pub device: Option<String>,
+
+    /// Read past entries from a booted simulator instead of this Mac
+    ///
+    /// Value is a UDID or name from `slog simulators`. With no value, uses the only booted
+    /// simulator (an error if there are zero or several). A simulator keeps its own log,
+    /// separate from this Mac's; your app's messages logged in the simulator are only here.
+    #[arg(
+        long,
+        value_name = "UDID|NAME",
+        num_args = 0..=1,
+        default_missing_value = "",
+        conflicts_with_all = ["archive", "device", "save_archive"]
+    )]
+    pub simulator: Option<String>,
 
     /// Keep the copied device archive at PATH (needs --device)
     ///
@@ -371,10 +399,23 @@ pub struct StreamArgs {
         conflicts_with = "predicate"
     )]
     pub device: Option<String>,
+
+    /// Stream from a booted simulator instead of this Mac
+    ///
+    /// Value is a UDID or name from `slog simulators`. With no value, uses the only booted
+    /// simulator (an error if there are zero or several). --predicate works here.
+    #[arg(
+        long,
+        value_name = "UDID|NAME",
+        num_args = 0..=1,
+        default_missing_value = "",
+        conflicts_with = "device"
+    )]
+    pub simulator: Option<String>,
 }
 
 #[derive(Args, Debug)]
-pub struct DevicesArgs {
+pub struct ListArgs {
     /// Print one JSON object per line instead of text
     #[arg(long)]
     pub json: bool,
@@ -572,6 +613,30 @@ mod tests {
             (args.name.as_str(), args.device.as_deref()),
             ("A.ips", Some(""))
         );
+    }
+
+    #[test]
+    fn simulator_excludes_device_and_archive() {
+        assert!(
+            Cli::try_parse_from(["slog", "show", "--simulator", "--predicate", "a == 1"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["slog", "show", "--simulator", "--device"]).is_err());
+        assert!(Cli::try_parse_from(["slog", "show", "--simulator", "--archive", "x"]).is_err());
+        let new = std::env::temp_dir().join(format!("slog-sim-{}.logarchive", std::process::id()));
+        let new = new.to_str().unwrap();
+        assert!(
+            Cli::try_parse_from(["slog", "show", "--simulator", "--save-archive", new]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["slog", "show", "--archive", "x", "--save-archive", new]).is_err()
+        );
+        assert!(Cli::try_parse_from(["slog", "stream", "--simulator", "--device"]).is_err());
+        let cli =
+            Cli::try_parse_from(["slog", "stream", "--simulator", "--duration", "5s"]).unwrap();
+        let Command::Stream(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(args.simulator.as_deref(), Some(""));
     }
 
     #[test]

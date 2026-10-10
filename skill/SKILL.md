@@ -1,13 +1,14 @@
 ---
 name: slog
 version: {{VERSION}}
-description: Read macOS and iOS unified logs (what Console.app shows) from the command line with `slog`. Use when debugging a Mac or iOS app or system behavior and you need log output, when the user mentions Console.app, os_log/Logger output, subsystems, or "check the logs", or when you need logs from a connected iPhone/iPad.
+description: Read macOS and iOS unified logs (what Console.app shows) from the command line with `slog`. Use when debugging a Mac or iOS app or system behavior and you need log output, when the user mentions Console.app, os_log/Logger output, subsystems, or "check the logs", or when you need logs from a connected iPhone/iPad or a booted simulator.
 ---
 
 # slog: Console.app for the command line
 
 `slog` prints unified log entries to stdout, one per line. Sources: this Mac (default), a
-`.logarchive` (`show --archive`), or a connected iPhone/iPad (`show`/`stream --device`).
+`.logarchive` (`show --archive`), a connected iPhone/iPad (`show`/`stream --device`), or a
+booted simulator (`show`/`stream --simulator`).
 `slog <command> --help` is the complete reference (filter syntax, output format, exit
 codes); read it before using an option you are unsure of.
 
@@ -69,6 +70,17 @@ different fields) is AND'd.
   by process or subsystem.
 - `--predicate` works with `show --device` but not `stream --device`; use `--filter`.
 
+## Simulators
+
+- An app running in a simulator logs to the simulator's own log, not the Mac's: add
+  `--simulator` to `show` or `stream`. Plain `slog show` will not find those messages.
+- `slog simulators` lists booted simulators. `--simulator` with no value uses the only
+  booted one; pass a UDID or name when several are booted. None booted: ask the user to run
+  the app in a simulator first (or `xcrun simctl boot NAME`).
+- Same options as the Mac otherwise, including `--predicate`:
+  `slog show --simulator --last 10m --filter 'process:MyApp level:error level:fault'`.
+- Simulator app crashes are reported on the Mac: plain `slog reports list --name MyApp`.
+
 ## Crash and diagnostic reports
 
 - `slog reports list --name MyApp` lists reports newest first (last 7 days, 50 max), as
@@ -81,6 +93,7 @@ different fields) is AND'd.
   check `size` in the list before showing one.
 - When debugging a crash, pair the report with the logs just before it:
   `slog show --start '<crash time minus 1m>' --end '<crash time>' --filter 'process:MyApp'`.
+  Add `--simulator` when the app crashed in a simulator.
 
 ## Limits
 
