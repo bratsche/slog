@@ -866,6 +866,7 @@ dependencies = [
  "clap",
  "futures",
  "idevice",
+ "libc",
  "plist",
  "serde",
  "serde_json",

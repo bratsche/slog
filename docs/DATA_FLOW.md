@@ -31,7 +31,21 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 | `src/run.rs` | `--limit` / `--duration` enforcement, stderr notes |
 | `src/output.rs` | Text and JSON rendering, `--fields` |
 | `src/skill.rs` | Embedded Claude skill (`skill/SKILL.md`): print and install |
+| `src/signals.rs` | Clean shutdown on SIGINT/SIGTERM/SIGHUP |
 | `src/main.rs` | Wiring and error/exit-code handling |
+
+## Signals
+
+`src/signals.rs` watches SIGINT/SIGTERM/SIGHUP on a worker thread (so it works even while
+the main thread is blocked writing stdout) and reports the first one to `main`. `main`
+drops the command future, which deletes temp dirs and kills child processes
+(`kill_on_drop`), then re-raises the signal with its default action so slog dies by it (a
+shell stops a script on Ctrl-C only then). A second signal, or 2 s without `main`
+finishing (typically blocked on stdout), re-raises immediately after deleting temp dirs
+registered with `signals::remove_on_force`. Signals inherited as ignored (`nohup`) are not
+handled at all. Children run in their own process group
+(`process_group(0)`), so a terminal Ctrl-C reaches only slog and cannot make a child fail
+first.
 
 ## Filter semantics
 
