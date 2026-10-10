@@ -24,7 +24,7 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 | `.logarchive` | `slog show --archive` | `/usr/bin/log show <archive>` | Done |
 | iPhone/iPad, live (USB, usbmuxd Wi-Fi) | `slog stream --device` | `idevice` crate, `os_trace_relay` | Done |
 | iPhone/iPad seen only by Xcode/CoreDevice (Wi-Fi) | `--device` | `idevice` `rsd` + `tunnel` + `remote_pairing` | Phase 2b |
-| iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Phase 2 |
+| iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Done |
 | Crash/spin/diagnostic reports (Mac) | `slog reports` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/...` | Phase 2 |
 | Crash reports (device) | `slog reports --device` | `crashreportcopymobile` service | Phase 2 |
 | Simulators | `--simulator` | `xcrun simctl spawn <id> log ...` | Phase 3 |
@@ -57,7 +57,10 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 ### Phase 2
 
-- `slog show --device` via `CreateArchive`
+- Done: `slog show --device` via `CreateArchive` (~5-10 s, ~300 MB temporary for the
+  default 5m window). Supports `--predicate`, unlike `stream --device`.
+- Possible follow-up: `--save-archive PATH` so repeated queries reuse one copy via
+  `--archive` instead of re-copying each time.
 - `slog reports` for Mac and device crash/spin/diagnostic reports (`.ips` JSON)
 - Done: `slog skill install --user|--project [--force]` and `slog skill print`. The skill
   (`skill/SKILL.md`, `{{VERSION}}` filled in at runtime) is embedded in the binary so it
