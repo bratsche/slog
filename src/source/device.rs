@@ -185,6 +185,9 @@ pub async fn collect_archive(selector: &str, start: DateTime<Local>, dest: &Path
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
+        // Own process group: a terminal Ctrl-C reaches only slog, which then stops this
+        // child itself (see `main`), instead of the child dying first and looking like a failure.
+        .process_group(0)
         .spawn()
         .context("failed to run /usr/bin/tar")?;
     let mut stdin = tar.stdin.take().expect("stdin is piped");

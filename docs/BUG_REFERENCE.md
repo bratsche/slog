@@ -4,6 +4,30 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 
 ## Fixed
 
+### Interrupted `show --device` left ~300 MB in `$TMPDIR` (2026-10-10)
+
+- **Symptom:** Ctrl-C, or a `timeout` (SIGTERM), during `show --device` left a
+  `$TMPDIR/slog-*` directory holding the partial or complete device archive.
+- **Root cause:** the default signal action ends the process at once, so the `TempDir`
+  destructor never ran. Children (`tar`, `log`) shared the terminal's process group, so a
+  Ctrl-C also killed them directly.
+- **Solution:** `src/signals.rs` watches SIGINT/SIGTERM/SIGHUP on a worker thread. On the
+  first signal `main` drops the command (deleting temp dirs; `kill_on_drop` stops children),
+  then resets the signal to its default and re-raises it, so slog dies *by* the signal.
+  `log` and `tar` run in their own process group so a Ctrl-C reaches only slog; otherwise
+  `log` could die first and surface as a spurious "log failed" error.
+- **Review catches (before merge):** exiting 128 + N instead of dying by the signal made
+  bash keep running a script after Ctrl-C (bash only aborts when the child was killed by
+  SIGINT); a watcher on the main thread never ran while slog was blocked writing to a full
+  pipe, so Ctrl-C was ignored; the forced exit (second signal or 2 s) then skipped temp-dir
+  deletion, because a blocked main thread never drops its `TempDir`; and installing tokio
+  handlers overrode signals the parent ignored, breaking `nohup`. Hence the re-raise, the
+  worker-thread watcher, `remove_on_force` (the watcher deletes registered temp dirs before
+  a forced exit), and skipping signals whose inherited disposition is SIG_IGN.
+- **Verified:** SIGINT to the process group, SIGTERM and SIGHUP during the copy, SIGINT
+  during `log show` and Mac `stream`: killed by the signal, no temp dirs, no children. A bash
+  loop stops at the first Ctrl-C; slog blocked on an unread pipe exits 2 s after SIGINT.
+
 ### `slog skill` review fixes (2026-10-10)
 
 - `HOME= slog skill install --user` installed into `./.claude/skills/slog/` (the project
@@ -123,8 +147,13 @@ Last Updated: 2026-10-10 · Version: 0.1.0
 - `show --archive` without `--start` or `--last` reads the whole archive; a sysdiagnose takes
   minutes. With `--archive`, `--last` counts back from the archive's newest entry.
 - `show --device` keeps its copied archive (~300 MB+) in `$TMPDIR/slog-*` while running and
-  deletes it on exit, but not if killed (Ctrl-C, SIGKILL). macOS purges `$TMPDIR`
+  deletes it on exit, including Ctrl-C, SIGTERM, SIGHUP and the forced exit 2 s later when
+  output is blocked, but not after `kill -9`, and possibly only partly if a second signal
+  lands during the ~0.1 s deletion. macOS purges `$TMPDIR`
   periodically; delete stragglers with `rm -rf "$TMPDIR"/slog-*`.
+- `log` runs in its own process group, so after `kill -9` of slog (or a forced exit) a
+  quiet `log stream` (narrow predicate) keeps running until its next write fails; clean up
+  with `pkill -f 'log stream --style ndjson'`. Ctrl-Z stops only slog.
 - Non-admin users cannot read `/Library/Logs/DiagnosticReports` (`root:_analyticsusers 0770`);
   `slog reports list` skips it with a stderr note and lists only `~/Library` reports.
 - Values logged as private print as `<private>` (same as Console.app).

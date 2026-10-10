@@ -92,6 +92,9 @@ fn run(args: Vec<String>, archive: Option<String>) -> Entries {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
+            // Own process group: a terminal Ctrl-C reaches only slog, which then stops this
+            // child itself (see `main`), instead of the child dying first and looking like a failure.
+            .process_group(0)
             .spawn()
             .with_context(|| format!("failed to run {LOG}"))?;
         let stdout = child.stdout.take().expect("stdout is piped");

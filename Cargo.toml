@@ -14,8 +14,9 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 futures = "0.3"
 idevice = { version = "0.1.68", features = ["usbmuxd", "syslog_relay", "crashreportcopymobile"] }
+libc = "0.2"
 plist = "1.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "signal", "sync"] }

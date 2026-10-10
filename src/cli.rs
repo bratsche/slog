@@ -65,7 +65,11 @@ Output:
 
 Exit status: 0 success (including no matches); 2 invalid arguments, including --filter
 syntax; 1 any other error, including a --predicate or --start/--end that /usr/bin/log
-rejects (its message is shown).
+rejects (its message is shown). Ctrl-C, SIGTERM and SIGHUP stop slog cleanly (temp files
+removed, child processes stopped) and it then dies by that signal, so a shell reports 130,
+143 or 129. A second signal, or slog still running 2 s later (e.g. blocked writing to a
+pipe nobody reads), stops it immediately. Signals ignored by the parent (nohup) stay
+ignored.
 Notes on stderr (truncation, no matches) never appear on stdout.
 
 Private data: values logged as private appear as <private>, same as Console.app.";

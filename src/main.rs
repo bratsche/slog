@@ -4,6 +4,7 @@ mod filter;
 mod output;
 mod reports;
 mod run;
+mod signals;
 mod skill;
 mod source;
 
@@ -27,12 +28,28 @@ use source::{device, mac};
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command {
-        Command::Show(args) => show(args).await,
-        Command::Stream(args) => stream(args).await,
-        Command::Devices(args) => devices(args).await,
-        Command::Skill(cmd) => skill(cmd),
-        Command::Reports(cmd) => reports_cmd(cmd).await,
+    let signal = signals::watch();
+    let command = async {
+        match cli.command {
+            Command::Show(args) => show(args).await,
+            Command::Stream(args) => stream(args).await,
+            Command::Devices(args) => devices(args).await,
+            Command::Skill(cmd) => skill(cmd),
+            Command::Reports(cmd) => reports_cmd(cmd).await,
+        }
+    };
+    // On a signal, the command is dropped when this select! completes (deleting temp dirs,
+    // killing children); only then does slog die by the signal. See `signals`.
+    let outcome = tokio::select! {
+        result = command => Ok(result),
+        Ok(sig) = signal => Err(sig),
+    };
+    let result = match outcome {
+        Ok(result) => result,
+        Err(sig) => {
+            let _ = io::stdout().flush();
+            signals::die_by(sig);
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -95,6 +112,7 @@ async fn show(args: ShowArgs) -> Result<()> {
                 (None, None) => Local::now() - Duration::from_secs(300),
             };
             let dir = tempfile::Builder::new().prefix("slog-").tempdir()?;
+            signals::remove_on_force(dir.path().to_path_buf());
             let path = dir.path().join("device.logarchive");
             device::collect_archive(selector, start, &path).await?;
             _device_archive = Some(dir);
