@@ -91,6 +91,9 @@ Field mapping:
   (unix seconds) is always sent: without it the device sends its whole store (~3 GB, ~20 s
   on an iPhone); with it, the files covering the window (~300 MB minimum, ~5 s). `--last`
   is converted to an explicit `--start` so `log` never interprets it relative to an archive.
+- With `--save-archive PATH` the copy goes to PATH (created with `create_dir`, so it must
+  not exist) instead of a temp dir. Until the copy completes, an `IncompleteDir` guard and
+  `signals::remove_on_force` delete it on failure or interruption; afterwards it is kept.
 
 - usbmuxd may list a device twice (USB and Wi-Fi); the USB entry wins.
 - `os_trace_relay` has no predicate support and streams every level; info/debug are dropped

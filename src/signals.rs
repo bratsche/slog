@@ -12,7 +12,7 @@
 //!
 //! Signals the parent set to be ignored (`nohup`, background jobs in scripts) stay ignored.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -58,6 +58,14 @@ pub fn watch() -> oneshot::Receiver<i32> {
 /// (e.g. a `TempDir`) still deletes it on the regular path.
 pub fn remove_on_force(path: PathBuf) {
     FORCE_CLEANUP.lock().expect("cleanup list lock").push(path);
+}
+
+/// Undoes `remove_on_force`, e.g. once a saved archive is complete.
+pub fn keep_on_force(path: &Path) {
+    FORCE_CLEANUP
+        .lock()
+        .expect("cleanup list lock")
+        .retain(|p| p != path);
 }
 
 /// Whether `sig` is currently ignored (inherited SIG_IGN, e.g. from `nohup`).

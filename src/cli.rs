@@ -81,7 +81,9 @@ Examples:
   slog show --last 10m --info --filter 'subsystem:com.example.myapp' --json
   slog show --start '2026-10-09 14:00:00' --end '2026-10-09 14:05:00' --limit 0
   slog show --archive ~/Desktop/sysdiagnose.logarchive --filter 'process:SpringBoard'
-  slog show --device --last 10m --filter 'process:MyApp level:error level:fault'";
+  slog show --device --last 10m --filter 'process:MyApp level:error level:fault'
+  slog show --device --last 1h --save-archive /tmp/phone.logarchive --filter 'process:MyApp'
+    then repeat queries with the `slog show --archive ... --start ...` command it prints";
 
 const STREAM_EXAMPLES: &str = "\
 Examples:
@@ -318,7 +320,7 @@ pub struct ShowArgs {
     /// Value is a UDID or device name from `slog devices`. With no value, uses the only
     /// connected device (an error if there are zero or several). Copies the device's log
     /// archive for the requested window first: expect ~5-10 s and ~300 MB of temporary
-    /// disk for the default --last 5m, more for longer windows.
+    /// disk (kept with --save-archive) for the default --last 5m, more for longer windows.
     #[arg(
         long,
         value_name = "UDID|NAME",
@@ -327,6 +329,15 @@ pub struct ShowArgs {
         conflicts_with = "archive"
     )]
     pub device: Option<String>,
+
+    /// Keep the copied device archive at PATH (needs --device)
+    ///
+    /// PATH must end in .logarchive and not exist yet; its parent must exist. Stderr then
+    /// prints a `slog show --archive PATH --start ...` command that re-queries exactly the
+    /// same window without re-copying; add your own --filter etc. An incomplete copy is
+    /// deleted; a complete one is yours to delete (`rm -rf PATH`).
+    #[arg(long, value_name = "PATH", requires = "device", value_parser = parse_new_logarchive)]
+    pub save_archive: Option<PathBuf>,
 
     /// Print at most N entries, keeping the newest; 0 = no limit
     ///
@@ -380,6 +391,27 @@ pub enum OutputField {
     Category,
     Thread,
     Message,
+}
+
+/// Validates --save-archive: `log show` only reads directories named *.logarchive, and an
+/// existing archive is never overwritten.
+fn parse_new_logarchive(s: &str) -> Result<PathBuf, String> {
+    if s.starts_with('~') {
+        return Err(format!(
+            "{s:?}: ~ is not expanded here; use an absolute path"
+        ));
+    }
+    let path = PathBuf::from(s);
+    if !path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().ends_with(".logarchive"))
+    {
+        return Err(format!("{s:?} must end in .logarchive"));
+    }
+    if path.symlink_metadata().is_ok() {
+        return Err(format!("{s:?} already exists"));
+    }
+    Ok(path)
 }
 
 /// Validates one --filter so syntax errors are reported as argument errors (exit 2).
@@ -493,6 +525,28 @@ mod tests {
             panic!()
         };
         assert_eq!(args.query.filter, ["-level:default"]);
+    }
+
+    #[test]
+    fn save_archive_needs_device_and_a_new_logarchive_path() {
+        let dir = std::env::temp_dir();
+        let new = dir.join(format!("slog-cli-test-{}.logarchive", std::process::id()));
+        let new = new.to_str().unwrap();
+        assert!(Cli::try_parse_from(["slog", "show", "--device", "--save-archive", new]).is_ok());
+        assert!(Cli::try_parse_from(["slog", "show", "--save-archive", new]).is_err());
+        assert!(
+            Cli::try_parse_from(["slog", "show", "--device", "--save-archive", "x.tar"]).is_err()
+        );
+        assert!(parse_new_logarchive(&format!("{new}/")).is_ok());
+        assert!(parse_new_logarchive("~/phone.logarchive").is_err());
+        let existing = dir.join(format!(
+            "slog-cli-existing-{}.logarchive",
+            std::process::id()
+        ));
+        std::fs::create_dir(&existing).unwrap();
+        let result = parse_new_logarchive(existing.to_str().unwrap());
+        std::fs::remove_dir(&existing).unwrap();
+        assert!(result.unwrap_err().contains("already exists"));
     }
 
     #[test]
