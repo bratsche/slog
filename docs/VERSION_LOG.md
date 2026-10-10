@@ -2,6 +2,11 @@
 
 Last Updated: 2026-10-10 · Version: 0.1.0
 
+## Unreleased
+
+- `slog skill install --user|--project [--force]` and `slog skill print`: the Claude skill
+  for slog, embedded in the binary.
+
 ## 0.1.0 — 2026-10-09 (unreleased)
 
 - Initial project: `show`, `stream`, `devices` commands.
