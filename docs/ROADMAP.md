@@ -27,7 +27,7 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 | iPhone/iPad, history | `slog show --device` | `os_trace_relay` `CreateArchive`, then `log show` | Done |
 | Crash/spin/diagnostic reports (Mac) | `slog reports list\|show` | Read `~/Library/Logs/DiagnosticReports`, `/Library/Logs/DiagnosticReports` | Done |
 | Crash reports (device) | `slog reports list\|show --device` | `crashreportmover` flush + `crashreportcopymobile` | Done |
-| Apple Watch crash reports | `slog reports --device` | `ProxiedDevice-*` dirs in the iPhone's report store | Not started |
+| Apple Watch crash reports | `slog reports list\|show --watch` | `ProxiedDevice-*` dirs (and their `Retired/`) in the iPhone's report store | Done |
 | Simulators (booted) | `slog show\|stream --simulator` | `xcrun simctl spawn <id> log ...` | Done |
 | Apple Watch | `--device` | `companion_proxy` through the paired iPhone | Phase 4 |
 
@@ -96,9 +96,13 @@ See [DATA_FLOW.md](DATA_FLOW.md) for the architecture.
 
 ### Phase 4
 
-- Apple Watch crash reports: the paired iPhone's report store has `ProxiedDevice-<id>`
-  directories with the Watch's reports; listing them is likely cheap via
-  `crashreportcopymobile`.
+- Done: Apple Watch reports (`reports list|show --watch`), from the paired iPhone's
+  `ProxiedDevice-<id>/` and `ProxiedDevice-<id>/Retired/` over the same AFC connection as
+  device reports. `Retired/` is included because the iPhone moves Watch reports there once
+  processed, usually within hours; the top level mostly holds the iPhone's bookkeeping
+  (`.proxy` files, which are skipped, and `ota_patch.txt`). Verified on Watch6,7 /
+  watchOS 26.6 through iPhone19,2 / iOS 27.0.1 (cpu_resource and Analytics reports; no
+  Watch crash report was available to test the crash summary).
 - Apple Watch through the paired iPhone
 
 ## Not planned

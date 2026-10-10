@@ -19,7 +19,8 @@ First release. Crate `slog-cli` (installs the `slog` command); Homebrew
 - Booted simulators: `simulators` lists them; `show --simulator` and `stream --simulator`
   run `log` inside one via `xcrun simctl spawn` (`--predicate` supported).
 - `reports list|show [--device]`: crash, hang and diagnostic reports from the Mac or a
-  device, with a compact crash summary (`--full` for the original file).
+  device, with a compact crash summary (`--full` for the original file). `--watch` reads a
+  paired Apple Watch's reports from the iPhone.
 
 ### Querying and output
 
