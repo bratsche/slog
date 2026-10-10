@@ -7,7 +7,7 @@ description: Read macOS and iOS unified logs (what Console.app shows) from the c
 # slog: Console.app for the command line
 
 `slog` prints unified log entries to stdout, one per line. Sources: this Mac (default), a
-`.logarchive` (`show --archive`), or a connected iPhone/iPad (`stream --device`).
+`.logarchive` (`show --archive`), or a connected iPhone/iPad (`show`/`stream --device`).
 `slog <command> --help` is the complete reference (filter syntax, output format, exit
 codes); read it before using an option you are unsure of.
 
@@ -53,11 +53,15 @@ different fields) is AND'd.
 - `slog devices` lists connected devices (USB, or Wi-Fi with Finder's "Show this iPhone
   when on Wi-Fi"). An `error:` column means the device is locked or untrusted: ask the
   user to unlock it and tap Trust.
-- `slog stream --device --duration 30s --filter 'process:MyApp'` uses the only connected
-  device; pass a UDID or name when several are connected.
+- `--device` with no value uses the only connected device; pass a UDID or name when
+  several are connected.
+- Past entries: `slog show --device --last 10m --filter 'process:MyApp level:error'`.
+  Each run copies the device's logs first (~5-10 s, ~300 MB temporary disk), so keep
+  `--last` short and prefer one well-filtered query over many small ones.
+- Live entries: `slog stream --device --duration 30s --filter 'process:MyApp'`.
 - Devices produce far more output than Macs with `--debug` (10k+ entries/s); always filter
   by process or subsystem.
-- `--predicate` is not available for devices; use `--filter`.
+- `--predicate` works with `show --device` but not `stream --device`; use `--filter`.
 
 ## Limits
 
