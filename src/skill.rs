@@ -57,11 +57,26 @@ pub fn install(path: &Path, force: bool) -> Result<Installed> {
 mod tests {
     use super::*;
 
-    fn temp_path(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("slog-skill-test-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir.join(".claude/skills/slog/SKILL.md")
+    /// A scratch directory removed when dropped, including when a test fails.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> TempDir {
+            let dir =
+                std::env::temp_dir().join(format!("slog-skill-test-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            TempDir(dir)
+        }
+
+        fn skill_path(&self) -> PathBuf {
+            self.0.join(".claude/skills/slog/SKILL.md")
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
@@ -74,7 +89,8 @@ mod tests {
 
     #[test]
     fn install_creates_then_is_unchanged() {
-        let path = temp_path("create");
+        let dir = TempDir::new("create");
+        let path = dir.skill_path();
         assert!(matches!(install(&path, false).unwrap(), Installed::Created));
         assert_eq!(fs::read_to_string(&path).unwrap(), contents());
         assert!(matches!(
@@ -85,7 +101,8 @@ mod tests {
 
     #[test]
     fn install_refuses_to_overwrite_edits_without_force() {
-        let path = temp_path("force");
+        let dir = TempDir::new("force");
+        let path = dir.skill_path();
         install(&path, false).unwrap();
         fs::write(&path, "my edits").unwrap();
         assert!(install(&path, false).is_err());
