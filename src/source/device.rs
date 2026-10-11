@@ -11,7 +11,6 @@ use anyhow::{Context, Result, bail};
 use async_stream::try_stream;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Timelike, Utc};
 use idevice::afc::AfcClient;
-use idevice::afc::errors::AfcError;
 use idevice::afc::opcode::AfcFopenMode;
 use idevice::crashreportcopymobile::{CrashReportCopyMobileClient, flush_reports};
 use idevice::lockdown::LockdownClient;
@@ -19,7 +18,7 @@ use idevice::os_trace_relay::{LogLevel, OsTraceLog, OsTraceRelayClient};
 use idevice::provider::{IdeviceProvider, RsdProvider, UsbmuxdProvider};
 use idevice::rsd::RsdHandshake;
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection, UsbmuxdDevice};
-use idevice::{Idevice, IdeviceError, IdeviceService, RsdService};
+use idevice::{Idevice, IdeviceService, RsdService};
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -431,180 +430,53 @@ async fn crash_reports(selector: &str) -> Result<(Connected, AfcClient)> {
     Ok((device, afc))
 }
 
-/// Report files in the device's crash report store.
-///
-/// For the device itself: the top level only; subdirectories (Retired, Assistant,
-/// ProxiedDevice-*) are not included. With `watch`: see `watch_dirs`. Watch reports carry
-/// their path in the store, e.g. `ProxiedDevice-<id>/Retired/x.ips`, which `pull_report`
-/// accepts when a name is in more than one Watch directory.
-async fn stored_reports(
-    afc: &mut AfcClient,
-    device: &Connected,
-    watch: bool,
-) -> Result<Vec<Report>> {
-    let dirs = if watch {
-        watch_dirs(afc, device).await?
-    } else {
-        vec![String::new()]
-    };
+/// Report files at the top of the device's crash report store. Subdirectories
+/// (Retired, Assistant, ...) are not included.
+pub async fn list_reports(selector: &str) -> Result<Vec<Report>> {
+    let (device, mut afc) = crash_reports(selector).await?;
+    let mut names = afc
+        .list_dir("/")
+        .await
+        .with_context(|| format!("cannot list crash reports on {}", device.udid))?;
+    names.retain(|n| n != "." && n != "..");
     let mut reports = Vec::new();
-    for dir in dirs {
-        for name in report_names(afc, device, &dir, watch).await? {
-            let path = store_path(&dir, &name);
-            let info = afc
-                .get_file_info(&path)
-                .await
-                .with_context(|| format!("cannot stat {path} on {}", device.udid))?;
-            if info.st_ifmt != "S_IFREG" {
-                continue;
-            }
-            reports.push(Report {
-                // AFC reports st_mtime as a UTC naive time.
-                time: Utc.from_utc_datetime(&info.modified).with_timezone(&Local),
-                size: info.size as u64,
-                name,
-                path: watch.then(|| path.trim_start_matches('/').into()),
-            });
+    for name in names {
+        let info = afc
+            .get_file_info(format!("/{name}"))
+            .await
+            .with_context(|| format!("cannot stat {name} on {}", device.udid))?;
+        if info.st_ifmt != "S_IFREG" {
+            continue;
         }
+        reports.push(Report {
+            // AFC reports st_mtime as a UTC naive time.
+            time: Utc.from_utc_datetime(&info.modified).with_timezone(&Local),
+            size: info.size as u64,
+            name,
+            path: None,
+        });
     }
     Ok(reports)
 }
 
-/// The directories holding paired Apple Watches' reports: `ProxiedDevice-<id>/` for each
-/// Watch, and its `Retired/`, where the iPhone moves Watch reports once processed (usually
-/// within hours), so the top level mostly holds the iPhone's bookkeeping files.
-async fn watch_dirs(afc: &mut AfcClient, device: &Connected) -> Result<Vec<String>> {
-    let mut dirs = Vec::new();
-    for name in list_dir(afc, device, "").await? {
-        if name.starts_with("ProxiedDevice-") && is_dir(afc, device, &name).await? {
-            let retired = format!("{name}/Retired");
-            if is_dir(afc, device, &retired).await? {
-                dirs.push(retired);
-            }
-            dirs.push(name);
-        }
-    }
-    if dirs.is_empty() {
-        bail!(
-            "no Apple Watch is paired with {} (its crash report store has no ProxiedDevice-* folder)",
-            device.udid
-        );
-    }
-    Ok(dirs)
-}
-
-/// Candidate report names in `dir`: every entry, minus the `.proxy` bookkeeping files the
-/// iPhone keeps in Watch directories.
-async fn report_names(
-    afc: &mut AfcClient,
-    device: &Connected,
-    dir: &str,
-    watch: bool,
-) -> Result<Vec<String>> {
-    let mut names = list_dir(afc, device, dir).await?;
-    if watch {
-        names.retain(|n| !n.ends_with(".proxy"));
-    }
-    Ok(names)
-}
-
-/// Absolute AFC path of `name` in `dir` ("" = top level) of the crash report store.
-fn store_path(dir: &str, name: &str) -> String {
-    if dir.is_empty() {
-        format!("/{name}")
-    } else {
-        format!("/{dir}/{name}")
-    }
-}
-
-/// Entry names in `dir` of the crash report store ("" = top level), without `.` and `..`.
-async fn list_dir(afc: &mut AfcClient, device: &Connected, dir: &str) -> Result<Vec<String>> {
-    let mut names = afc
-        .list_dir(format!("/{dir}"))
-        .await
-        .with_context(|| format!("cannot list crash reports in /{dir} on {}", device.udid))?;
-    names.retain(|n| n != "." && n != "..");
-    Ok(names)
-}
-
-/// Whether `path` in the crash report store is a directory; false if it does not exist.
-async fn is_dir(afc: &mut AfcClient, device: &Connected, path: &str) -> Result<bool> {
-    match afc.get_file_info(format!("/{path}")).await {
-        Ok(info) => Ok(info.st_ifmt == "S_IFDIR"),
-        Err(IdeviceError::Afc(AfcError::ObjectNotFound)) => Ok(false),
-        Err(e) => Err(e).with_context(|| format!("cannot stat /{path} on {}", device.udid)),
-    }
-}
-
-/// See `stored_reports`.
-pub async fn list_reports(selector: &str, watch: bool) -> Result<Vec<Report>> {
-    let (device, mut afc) = crash_reports(selector).await?;
-    stored_reports(&mut afc, &device, watch).await
-}
-
-/// `name` is a file name from `slog reports list`; with `watch`, also a Watch report's path
-/// in the store (`ProxiedDevice-<id>/[Retired/]name`).
-pub async fn pull_report(selector: &str, name: &str, watch: bool) -> Result<Vec<u8>> {
-    let list = if watch {
-        "slog reports list --watch"
-    } else {
-        "slog reports list --device"
-    };
-    if name.contains('/') && !(watch && is_watch_path(name)) {
-        bail!("{name:?} is not a report name; use a name from `{list}`");
+pub async fn pull_report(selector: &str, name: &str) -> Result<Vec<u8>> {
+    if name.contains('/') {
+        bail!("device report names have no '/'; use a name from `slog reports list --device`");
     }
     let (device, mut afc) = crash_reports(selector).await?;
-    let path = if !watch || name.contains('/') {
-        store_path("", name)
-    } else {
-        let mut found = Vec::new();
-        for dir in watch_dirs(&mut afc, &device).await? {
-            if report_names(&mut afc, &device, &dir, true)
-                .await?
-                .iter()
-                .any(|n| n == name)
-            {
-                found.push(format!("{dir}/{name}"));
-            }
-        }
-        match found.as_slice() {
-            [one] => store_path("", one),
-            [] => bail!(
-                "no Apple Watch report {name:?} on {} (see `{list}`)",
-                device.udid
-            ),
-            several => bail!(
-                "{name:?} is in several Watch report folders; pass one of these paths instead: {}",
-                several.join(", ")
-            ),
-        }
-    };
     let mut file = afc
-        .open(&path, AfcFopenMode::RdOnly)
+        .open(format!("/{name}"), AfcFopenMode::RdOnly)
         .await
         .with_context(|| {
             format!(
-                "cannot read report {:?} on {} (see `{list}`)",
-                path.trim_start_matches('/'),
+                "cannot read report {name:?} on {} (see `slog reports list --device`)",
                 device.udid
             )
         })?;
     let data = file.read_entire().await;
     // Closed even if the read failed, so the device-side handle is not leaked.
     file.close().await?;
-    data.with_context(|| format!("cannot read report {path} on {}", device.udid))
-}
-
-/// `ProxiedDevice-<id>/name` or `ProxiedDevice-<id>/Retired/name`, as `list --watch --json`
-/// prints in `path`.
-fn is_watch_path(path: &str) -> bool {
-    let parts: Vec<&str> = path.split('/').collect();
-    let file_ok = |f: &str| !f.is_empty() && f != "." && f != "..";
-    match parts.as_slice() {
-        [watch, file] => watch.starts_with("ProxiedDevice-") && file_ok(file),
-        [watch, "Retired", file] => watch.starts_with("ProxiedDevice-") && file_ok(file),
-        _ => false,
-    }
+    data.with_context(|| format!("cannot read report {name} on {}", device.udid))
 }
 
 pub fn stream(selector: String, include_info: bool, include_debug: bool) -> Entries {
@@ -666,26 +538,6 @@ fn device_time(ts: NaiveDateTime) -> Result<chrono::DateTime<Local>> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn watch_paths() {
-        assert!(is_watch_path("ProxiedDevice-8cbc/Retired/x.ips"));
-        assert!(is_watch_path("ProxiedDevice-8cbc/ota_patch.txt"));
-        for bad in [
-            "x.ips",
-            "Retired/x.ips",
-            "ProxiedDevice-8cbc/DiagnosticLogs/x.txt",
-            "ProxiedDevice-8cbc/..",
-            "ProxiedDevice-8cbc/Retired/",
-            "/ProxiedDevice-8cbc/x.ips",
-        ] {
-            assert!(!is_watch_path(bad), "{bad}");
-        }
-        assert_eq!(store_path("", "a.ips"), "/a.ips");
-        assert_eq!(
-            store_path("ProxiedDevice-1/Retired", "a.ips"),
-            "/ProxiedDevice-1/Retired/a.ips"
-        );
-    }
     use chrono::DateTime;
 
     #[test]
