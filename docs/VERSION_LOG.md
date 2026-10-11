@@ -11,11 +11,13 @@ First release. Crate `slog-cli` (installs the `slog` command); Homebrew
 
 - `show` and `stream` for this Mac via `/usr/bin/log --style ndjson`; `show --archive` for
   `.logarchive` files.
-- iOS devices over usbmuxd (USB; Wi-Fi via Finder's setting is untested):
+- iOS devices over usbmuxd (USB, or Wi-Fi via Finder's setting):
   `stream --device` (live, `os_trace_relay`), `show --device` (past entries, copied with
   `os_trace_relay` `CreateArchive`, no `sudo`; supports `--predicate`), and
   `--save-archive PATH` to keep that copy for reuse with `--archive`.
 - `devices` lists connected iOS devices.
+- `pair`: pairs a USB-connected device with slog so `--device` reaches it over Wi-Fi
+  afterwards without Finder's setting (own remote pairing and in-process tunnel).
 - Booted simulators: `simulators` lists them; `show --simulator` and `stream --simulator`
   run `log` inside one via `xcrun simctl spawn` (`--predicate` supported).
 - `reports list|show [--device]`: crash, hang and diagnostic reports from the Mac or a

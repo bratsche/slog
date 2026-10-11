@@ -28,6 +28,8 @@ Source (source/*)  ──►  Stream<Result<Entry>>  ──►  run.rs  ──�
 | `src/filter.rs` | Console token parser; NSPredicate and in-process backends |
 | `src/source/mac.rs` | Spawns `/usr/bin/log`, parses ndjson into `Entry` |
 | `src/source/simulator.rs` | Lists booted simulators, resolves `--simulator`, builds `simctl spawn ... log` |
+| `src/source/remote.rs` | `slog pair` (USB) and the Wi-Fi route: pairing store, Bonjour match, tunnel, RSD |
+| `src/source/dnssd.rs` | Bonjour browse/resolve/address lookup via `dns_sd.h` (mDNSResponder) |
 | `src/source/device.rs` | Lists devices, resolves `--device`, streams `os_trace_relay`, copies archives |
 | `src/reports.rs` | Mac report listing, selection, crash summary rendering |
 | `src/run.rs` | `--limit` / `--duration` enforcement, stderr notes |
@@ -102,6 +104,18 @@ Field mapping:
   `signals::remove_on_force` delete it on failure or interruption; afterwards it is kept.
 
 - usbmuxd may list a device twice (USB and Wi-Fi); the USB entry wins.
+- `--device` tries usbmuxd first, then devices paired with `slog pair`, over Wi-Fi:
+
+```text
+pairing store ──► Bonjour browse _remotepairing._tcp ──► resolve (TXT identifier, authTag)
+   (<UDID>.plist)      match authTag = SipHash(alt_irk, identifier)
+──► TCP host:port ──► pair-verify ──► createListener ──► TCP tunnel port ──► TLS-PSK
+──► CDTunnel (IPv6 packets) ──► jktcp Adapter (TCP in process) ──► RSD (serverRSDPort)
+──► *.shim.remote services: os_trace_relay, crashreportcopymobile, crashreportmover
+```
+
+  The `AdapterHandle` lives in `device::Connected`, so the tunnel lasts as long as the
+  command. Services are reached only at ports RSD names.
 - `os_trace_relay` has no predicate support and streams every level; info/debug are dropped
   in-process unless requested.
 

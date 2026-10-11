@@ -1,7 +1,9 @@
 //! Log sources. Each produces a stream of `Entry` values; filtering and output are shared.
 
 pub mod device;
+pub mod dnssd;
 pub mod mac;
+pub mod remote;
 pub mod simulator;
 
 use std::pin::Pin;

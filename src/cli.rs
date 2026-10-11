@@ -18,7 +18,7 @@ one entry per line.
 Sources:
   this Mac             default for `show` and `stream`
   a .logarchive file   `slog show --archive PATH`
-  an iPhone or iPad    `slog show|stream --device [UDID|NAME]` (USB or Wi-Fi; trusted)
+  an iPhone or iPad    `slog show|stream --device [UDID|NAME]` (USB, or Wi-Fi; trusted)
   a booted simulator   `slog show|stream --simulator [UDID|NAME]`
 
 Crash, hang and diagnostic reports (Console.app's Reports): `slog reports`. Apps crashing
@@ -113,17 +113,44 @@ pub enum Command {
     #[command(after_long_help = format!("{FILTER_HELP}\n\n{STREAM_EXAMPLES}"))]
     Stream(StreamArgs),
 
-    /// List connected iOS devices and their UDIDs, for `--device`
+    /// List reachable iOS devices (USB, Wi-Fi) and their UDIDs, for `--device`
     #[command(long_about = "\
-List every iOS device visible to usbmuxd (USB, or Wi-Fi if
-\"Show this iPhone when on Wi-Fi\" is enabled in Finder). Use the UDID or name with
-`slog show --device` or `slog stream --device`.
+List the iOS devices slog can reach, for `--device`:
+  usb       connected by USB
+  network   over Wi-Fi with Finder's \"Show this iPhone when on Wi-Fi\"
+  wifi      over Wi-Fi through slog's own pairing (`slog pair`, once, over USB); found
+            over Bonjour, so it must be awake, unlocked and on this Mac's network
+Use the UDID or name with `slog show --device` or `slog stream --device`.
 
-Text: tab-separated UDID, connection (usb|network), name, model, OS version.
+Text: tab-separated UDID, connection, name, model, OS version.
 JSON (--json): one object per line with keys udid, connection, name, model, os_version,
 error. Devices that are not trusted show an error instead of details (name, model and
-os_version are null); unlock the device and tap Trust, then retry.")]
+os_version are null); unlock the device and tap Trust, then retry. os_version is null for
+wifi devices (slog does not connect to list them).")]
     Devices(ListArgs),
+
+    /// Pair a USB-connected iPhone or iPad with slog, to reach it over Wi-Fi later
+    #[command(long_about = "\
+Pair a USB-connected iPhone or iPad with slog, so `--device` reaches it over Wi-Fi later
+without the cable and without Finder's \"Show this iPhone when on Wi-Fi\". Uses the same
+remote pairing Xcode uses for wireless devices. The device must already trust this Mac
+(unlock it and tap Trust when first connected); the USB connection then counts as consent,
+so pairing shows no prompt. Pairing again replaces the old pairing.
+
+The pairing is stored in ~/Library/Application Support/slog/pairing/<UDID>.plist (mode
+0600: it lets its holder use the device's developer services). Delete it to forget the
+device here. slog cannot remove the pairing from the device; see the README (\"Managing
+pairings\") for resetting the device's trusted computers.
+
+Over Wi-Fi, slog finds the device over Bonjour, so it must be awake, unlocked and on this
+Mac's network. Connecting needs macOS's Local Network permission for the app slog runs in
+(your terminal, editor or AI agent host): without it, connecting fails with \"No route to
+host\"; allow the app in System Settings > Privacy & Security > Local Network and retry.
+
+Examples:
+  slog pair                 the only USB-connected device
+  slog pair --device 00008160-00123C380100000A")]
+    Pair(PairArgs),
 
     /// List booted simulators and their UDIDs, for `--simulator`
     #[command(long_about = "\
@@ -354,9 +381,11 @@ pub struct ShowArgs {
     /// Read past entries from an iOS device instead of this Mac
     ///
     /// Value is a UDID or device name from `slog devices`. With no value, uses the only
-    /// connected device (an error if there are zero or several). Copies the device's log
-    /// archive for the requested window first: expect ~5-10 s and ~300 MB of temporary
-    /// disk (kept with --save-archive) for the default --last 5m, more for longer windows.
+    /// connected device (an error if there are zero or several); USB devices come first,
+    /// then devices paired for Wi-Fi with `slog pair`. Copies the device's log archive for
+    /// the requested window first: expect ~5-10 s over USB (~30-40 s over Wi-Fi) and ~300 MB
+    /// of temporary disk (kept with --save-archive) for the default --last 5m, more for
+    /// longer windows.
     #[arg(
         long,
         value_name = "UDID|NAME",
@@ -412,7 +441,8 @@ pub struct StreamArgs {
     /// Stream from an iOS device instead of this Mac
     ///
     /// Value is a UDID or device name from `slog devices`. With no value, uses the only
-    /// connected device (an error if there are zero or several).
+    /// connected device (an error if there are zero or several); USB devices come first,
+    /// then devices paired for Wi-Fi with `slog pair`.
     #[arg(
         long,
         value_name = "UDID|NAME",
@@ -434,6 +464,13 @@ pub struct StreamArgs {
         conflicts_with = "device"
     )]
     pub simulator: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct PairArgs {
+    /// The device to pair (UDID or name); with no value, the only USB-connected device
+    #[arg(long, value_name = "UDID|NAME", num_args = 0..=1, default_missing_value = "")]
+    pub device: Option<String>,
 }
 
 #[derive(Args, Debug)]
