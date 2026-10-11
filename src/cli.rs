@@ -179,10 +179,8 @@ into this binary, so it always matches this slog version; after upgrading slog, 
 List and print crash, hang and diagnostic reports, like Console.app's Reports section.
 
 Mac reports come from ~/Library/Logs/DiagnosticReports and /Library/Logs/DiagnosticReports;
-device reports from the device's crash report store (top level only, as with Mac). Apple
-Watch reports (--watch) come from the paired iPhone's store, including ones it has already
-processed. Reports are named by file, e.g. MyApp-2026-10-10-084952.ips: the process, then
-the local time.
+device reports from the device's crash report store (top level only, as with Mac). Reports
+are named by file, e.g. MyApp-2026-10-10-084952.ips: the process, then the local time.
 
 Typical use: `slog reports list --name MyApp`, then `slog reports show <name>`."
     )]
@@ -228,15 +226,13 @@ pub enum ReportsCommand {
 Output:
   Text: tab-separated time (local), size in bytes, name.
   JSON (--json): one object per line with keys name, time (RFC 3339), size, path (the
-  full path on this Mac; with --watch, the path in the iPhone's store, which `reports show
-  --watch` accepts when two Watch folders hold the same name; null for other device reports).
+  full path on this Mac; null for device reports).
   A note on stderr says when --limit dropped reports.
 
 Examples:
   slog reports list --name MyApp
   slog reports list --last 1h
-  slog reports list --device --name MyApp --json
-  slog reports list --watch --last 2d")]
+  slog reports list --device --name MyApp --json")]
     List(ReportsListArgs),
 
     /// Print one report; crash reports are summarized unless --full
@@ -253,7 +249,6 @@ Put NAME before --device: `--device NAME` would read NAME as the device.
 Examples:
   slog reports show MyApp-2026-10-10-084952.ips
   slog reports show MyApp-2026-10-10-084952.ips --device
-  slog reports show MyWatchApp-2026-10-10-091502.ips --watch
   slog reports show ~/Library/Logs/DiagnosticReports/MyApp-2026-10-10-084952.ips --full")]
     Show(ReportsShowArgs),
 }
@@ -280,20 +275,11 @@ pub struct ReportsListArgs {
     /// only connected device). Takes a few seconds.
     #[arg(long, value_name = "UDID|NAME", num_args = 0..=1, default_missing_value = "")]
     pub device: Option<String>,
-
-    /// Apple Watch reports, read from the paired iPhone (--device picks the iPhone; without
-    /// it, the only connected device)
-    ///
-    /// Includes every Watch paired with that iPhone, and reports the iPhone has already
-    /// processed (its Retired folder), since a Watch's reports usually move there within hours.
-    #[arg(long)]
-    pub watch: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct ReportsShowArgs {
-    /// Report name from `slog reports list`, or a path containing '/' (e.g. ./x.ips; with
-    /// --watch, the `path` from `slog reports list --watch --json`)
+    /// Report name from `slog reports list`, or a path containing '/' (e.g. ./x.ips)
     pub name: String,
 
     /// Print the whole original file instead of a crash summary
@@ -304,14 +290,6 @@ pub struct ReportsShowArgs {
     /// device)
     #[arg(long, value_name = "UDID|NAME", num_args = 0..=1, default_missing_value = "")]
     pub device: Option<String>,
-
-    /// Apple Watch reports, read from the paired iPhone (--device picks the iPhone; without
-    /// it, the only connected device)
-    ///
-    /// Includes every Watch paired with that iPhone, and reports the iPhone has already
-    /// processed (its Retired folder), since a Watch's reports usually move there within hours.
-    #[arg(long)]
-    pub watch: bool,
 }
 
 #[derive(Args, Debug)]
@@ -696,23 +674,6 @@ mod tests {
             panic!()
         };
         assert_eq!(args.simulator.as_deref(), Some(""));
-    }
-
-    #[test]
-    fn reports_watch_works_with_or_without_device() {
-        let cli = Cli::try_parse_from(["slog", "reports", "list", "--watch"]).unwrap();
-        let Command::Reports(ReportsCommand::List(args)) = cli.command else {
-            panic!()
-        };
-        assert!(args.watch && args.device.is_none());
-        let cli = Cli::try_parse_from([
-            "slog", "reports", "show", "A.ips", "--watch", "--device", "X",
-        ])
-        .unwrap();
-        let Command::Reports(ReportsCommand::Show(args)) = cli.command else {
-            panic!()
-        };
-        assert!(args.watch && args.device.as_deref() == Some("X"));
     }
 
     #[test]

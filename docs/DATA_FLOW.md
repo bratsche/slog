@@ -124,16 +124,10 @@ pairing store ──► Bonjour browse _remotepairing._tcp ──► resolve (TX
 ```text
 slog reports list  ──► Mac: read_dir(~/Library/Logs/DiagnosticReports, /Library/...)
                    └─► device: crashreportmover flush (~1-2 s) → AFC list_dir + stat
-                         (--watch: ProxiedDevice-*/ and ProxiedDevice-*/Retired/ instead of /)
                          ──► reports::select (since --last, --name, newest first, --limit) ──► stdout
 slog reports show  ──► Mac: find by name in both dirs (or a path) / device: AFC open + read
-                         (--watch: lists the Watch dirs first to find the name's directory)
                          ──► reports::render: .ips bug_type 309 → crash summary; else unchanged
 ```
 
 - Report `time` is the file's modification time (AFC returns it as UTC; converted to local).
-- Device report names are file names; `/` is rejected. With `--watch` the name is looked up
-  in every Watch directory; if it is in more than one, the error lists their store paths
-  (`ProxiedDevice-<id>/[Retired/]name`, also `path` in `list --watch --json`), which `show
-  --watch` accepts. `.proxy` files there are the iPhone's bookkeeping and are not listed.
-- No `ProxiedDevice-*` folder means no Watch is paired: `--watch` is then an error.
+- Device report names are file names; `/` is rejected.
